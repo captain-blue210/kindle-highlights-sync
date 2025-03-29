@@ -1,6 +1,22 @@
 // settings.ts
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import KindleHighlightsPlugin from "./main";
+
+// Define supported Amazon regions
+const AMAZON_REGIONS: Record<string, string> = {
+	com: "USA (.com)",
+	"co.jp": "Japan (.co.jp)",
+	"co.uk": "UK (.co.uk)",
+	de: "Germany (.de)",
+	fr: "France (.fr)",
+	es: "Spain (.es)",
+	it: "Italy (.it)",
+	ca: "Canada (.ca)",
+	"com.au": "Australia (.com.au)",
+	"com.br": "Brazil (.com.br)",
+	"com.mx": "Mexico (.com.mx)",
+	in: "India (.in)",
+};
 
 export interface KindleHighlightsSettings {
 	outputDirectory: string;
@@ -57,19 +73,36 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 					})
 			);
 
-		// 3. Amazonリージョン設定
+		// 3. Amazonリージョン設定 (Dropdown)
 		new Setting(containerEl)
 			.setName("Amazon Region")
-			.setDesc("Your Amazon region (com, co.jp, co.uk, etc.)")
-			.addText((text) =>
-				text
-					.setPlaceholder("com")
+			.setDesc("Select your Amazon Kindle region")
+			.addDropdown((dropdown) => {
+				// Add regions to dropdown
+				for (const key in AMAZON_REGIONS) {
+					dropdown.addOption(key, AMAZON_REGIONS[key]);
+				}
+
+				// Set current value and handle change
+				dropdown
 					.setValue(this.plugin.settings.amazonRegion)
 					.onChange(async (value) => {
-						this.plugin.settings.amazonRegion = value;
-						await this.plugin.saveSettings();
-					})
-			);
+						if (AMAZON_REGIONS[value]) {
+							this.plugin.settings.amazonRegion = value;
+							await this.plugin.saveSettings();
+						} else {
+							// Handle potential invalid value if settings get corrupted
+							new Notice(
+								`Invalid Amazon region selected: ${value}. Reverting to default.`
+							);
+							this.plugin.settings.amazonRegion =
+								DEFAULT_SETTINGS.amazonRegion;
+							await this.plugin.saveSettings();
+							// Refresh the settings display to show the reverted value
+							this.display();
+						}
+					});
+			});
 
 		// 4. メタデータダウンロード設定
 		new Setting(containerEl)
