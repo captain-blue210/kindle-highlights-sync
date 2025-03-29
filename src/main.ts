@@ -1,7 +1,7 @@
 import { Notice, Plugin, TFile } from "obsidian"; // Ensure App is imported
-import { AmazonLoginModal, AmazonSession } from "./modals/AmazonLoginModal"; // Add this line
+import { AmazonLogoutModal } from "./modals/AmazonLogoutModal"; // Import Logout Modal
 import { Book, Highlight } from "./models";
-import { scrapeKindleHighlights } from "./services/kindle-api";
+import { KindleApiService } from "./services/kindle-api"; // Import the service class
 import { fetchBookMetadata } from "./services/metadata-service";
 import { renderTemplate } from "./services/template-renderer";
 import {
@@ -12,15 +12,31 @@ import {
 
 export default class KindleHighlightsPlugin extends Plugin {
 	settings: KindleHighlightsSettings;
+	kindleApiService: KindleApiService; // Add service instance member
 
 	async onload() {
 		await this.loadSettings();
+		this.kindleApiService = new KindleApiService(this.app); // Instantiate the service
 
 		// 5. コマンドから同期実行機能
 		this.addCommand({
 			id: "sync-kindle-highlights",
 			name: "Sync Kindle Highlights",
 			callback: () => this.syncHighlights(),
+		});
+
+		// Add Logout command
+		this.addCommand({
+			id: "logout-kindle",
+			name: "Logout from Kindle",
+			callback: () => {
+				// Show confirmation modal
+				new AmazonLogoutModal(
+					this.app,
+					this.kindleApiService,
+					this.settings.amazonRegion // Pass the current region
+				).open();
+			},
 		});
 
 		// 設定タブの追加
@@ -48,26 +64,36 @@ export default class KindleHighlightsPlugin extends Plugin {
 			// 同期開始通知
 			new Notice("Starting Kindle highlights sync...");
 
-			// --- Step 1: Authentication ---
-			// Use the new login modal, passing the region from settings
-			const loginModal = new AmazonLoginModal(
-				this.app,
-				this.settings.amazonRegion
-			);
-			const session: AmazonSession | null = await loginModal.doLogin(); // Attempt login
+			// --- Step 1: Authentication (Check & Trigger) ---
+			let isLoggedIn = this.kindleApiService.isLoggedIn();
 
-			if (!session) {
-				new Notice("Kindle login cancelled or failed.");
-				return; // Stop sync if login doesn't succeed
+			if (!isLoggedIn) {
+				new Notice("Amazon session not found. Please log in.");
+				const loginSuccess = await this.kindleApiService.login(
+					this.settings.amazonRegion
+				);
+				if (!loginSuccess) {
+					new Notice("Kindle login cancelled or failed.");
+					return; // Stop sync if login doesn't succeed
+				}
+				// Re-check status after successful login attempt
+				isLoggedIn = this.kindleApiService.isLoggedIn();
 			}
-			new Notice("Login successful. Fetching highlights...");
 
-			// --- Step 2: Scrape Highlights ---
-			// Pass the authenticated session to the scraping function
-			const { books, highlights } = await scrapeKindleHighlights(
-				this.settings.amazonRegion,
-				session // Pass session instead of credentials
-			);
+			if (!isLoggedIn) {
+				// Should not happen if login succeeded, but as a safeguard
+				new Notice("Login required to sync highlights.");
+				return;
+			}
+
+			new Notice("Fetching highlights...");
+
+			// --- Step 2: Fetch Highlights ---
+			// Use the service method
+			const { books, highlights } =
+				await this.kindleApiService.fetchHighlights(
+					this.settings.amazonRegion
+				);
 			new Notice(
 				`Found ${books.length} books and ${highlights.length} highlights.`
 			); // Add feedback

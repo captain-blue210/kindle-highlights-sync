@@ -1,40 +1,102 @@
-# Kindle Highlights Sync - Implementation Plan
+# Implementation Plan: Amazon Cloud Reader Login Feature (2025-03-29)
 
-**Goal:** Implement the features described in `README.md`, focusing on direct scraping of Kindle Cloud Reader highlights and metadata within the Obsidian plugin.
+## Goal
 
-**Approach:** Adopt a direct HTTP scraping method, similar to the `hadynz/obsidian-kindle-plugin`, using Obsidian's `requestUrl` API and handling authentication via a custom login modal.
+Enable users to log into their Amazon account within Obsidian and utilize that session to synchronize Kindle highlights.
 
-**Steps:**
+## Key Components
 
-1.  **Implement Authentication:**
-    *   Replace the current basic `KindleLoginModal` in `src/main.ts`.
-    *   Create a new `AmazonLoginModal` that uses `requestUrl` to perform Amazon login steps, capturing session cookies. Handle potential MFA.
-2.  **Implement Scraping Logic:**
-    *   **Identify Endpoints:** Research (e.g., via browser network inspection) the specific API endpoints `read.amazon.com` uses for listing books and fetching highlights.
-    *   **Develop `scrapeKindleHighlights`:** Rewrite the function in `src/services/kindle-api.ts` to:
-        *   Use `requestUrl` to call the identified Amazon endpoints.
-        *   Include authentication cookies in request headers.
-        *   Parse the response (HTML/JSON) to extract book/highlight data into models.
-3.  **Implement Metadata Fetching:**
-    *   Update `fetchBookMetadata` in `src/services/metadata-service.ts` to extract metadata from Kindle data (ASIN, cover URL) or make additional authenticated calls. Consider OpenLibrary as a fallback.
-4.  **Refactor `syncHighlights`:** Ensure the main function in `src/main.ts` correctly calls the new login modal and updated scraping functions.
-5.  **Error Handling & Maintenance:** Implement robust error handling for network issues, login failures, and potential Amazon site changes. Add comments about fragility.
-6.  **Testing:** Thoroughly test the login and sync process across different scenarios.
+*   **`AmazonLoginModal`**: Modal embedding the Amazon login page via `iframe` and handling authentication.
+*   **`AmazonLogoutModal`**: Modal or prompt for handling logout.
+*   **`KindleApiService`**: Service managing login state, communication with Amazon (login, data fetching).
+*   **`SettingsTab`**: UI for Amazon region selection.
 
-**Diagram:**
+## Steps
+
+1.  **Preparation:**
+    *   Add Amazon region setting (`com`, `co.jp`, etc.) to `settings.ts`.
+    *   Define region-specific login and Cloud Reader URLs (e.g., in `KindleApiService`).
+
+2.  **`AmazonLoginModal` Implementation (`src/modals/AmazonLoginModal.ts`):**
+    *   Inherit from Obsidian `Modal`.
+    *   `onOpen()`: Create `iframe`, add to `contentEl`, set `src` to region-specific login URL.
+    *   Add CSS for `iframe` sizing.
+    *   `onClose()`: Clean up resources.
+
+3.  **Login Success Detection (`AmazonLoginModal`):**
+    *   Monitor `iframe` `load` event.
+    *   In handler, check `iframe.contentWindow.location.href` against region-specific Cloud Reader base URL.
+        *   **Risk:** Cross-origin restrictions might block access. Investigate alternatives if needed (e.g., indirect monitoring, manual confirmation).
+    *   On success: Close modal, notify caller (Promise/callback).
+    *   On failure: Notify caller/show error.
+
+4.  **Session Management (`KindleApiService`):**
+    *   Receive login success notification, update internal state flag.
+    *   **Hypothesis/Verification:** Assume/verify that `requestUrl` automatically uses cookies set in the `iframe` for same-domain requests.
+    *   Provide `isLoggedIn()` method.
+
+5.  **`AmazonLogoutModal` & Logout Logic (New):**
+    *   Create simple confirmation modal (`AmazonLogoutModal`).
+    *   On logout execution:
+        *   **Strategy 1 (Preferred):** Navigate an `iframe` (visible or hidden) to the Amazon logout URL to attempt cookie clearing.
+        *   **Strategy 2 (Fallback):** If Strategy 1 fails, reset internal plugin state only and inform the user (actual Amazon session might persist).
+    *   Update `KindleApiService` internal state.
+
+6.  **Plugin Integration (`main.ts`, `KindleApiService`):**
+    *   Add login/logout commands and ribbon icons.
+    *   On sync command: Check `KindleApiService.isLoggedIn()`.
+    *   If not logged in: Show `AmazonLoginModal`.
+    *   If logged in: Proceed with data fetching via `KindleApiService`.
+    *   Implement `login()`, `logout()`, `fetchHighlights()` interfaces in `KindleApiService`. `login()` triggers `AmazonLoginModal`.
+
+7.  **Data Fetching (`KindleApiService`):**
+    *   Implement logic to fetch highlights from Cloud Reader using the established session (expecting `requestUrl` to use cookies). This likely involves scraping or interacting with Cloud Reader's internal APIs.
+
+8.  **Error Handling & Testing:**
+    *   Implement robust error handling for all stages (login, logout, fetch).
+    *   Use `Notice` for user feedback.
+    *   Test thoroughly across regions, 2FA, failures, etc.
+
+## Flow Diagram
 
 ```mermaid
 graph TD
-    Start[Analyze Reference Plugin] --> Feasible{Direct Scraping Confirmed};
-    Feasible --> Plan[Adopt Direct HTTP Scraping];
-    Plan --> Step1[Implement New Login Modal (HTTP Auth)];
-    Step1 --> Step2[Identify Amazon API Endpoints];
-    Step2 --> Step3[Implement Scraping Functions (requestUrl + Cookies)];
-    Step3 --> Step4[Implement Metadata Fetching (from Amazon data)];
-    Step4 --> Step5[Refactor main sync flow];
-    Step5 --> Step6[Add Robust Error Handling];
-    Step6 --> Step7[Test Thoroughly];
-    Step7 --> End[Implementation Ready];
+    A[User starts Sync/Login] --> B{Logged In?};
+    B -- No --> C[Show AmazonLoginModal];
+    B -- Yes --> D[Proceed to Fetch Highlights (KindleApiService)];
+
+    subgraph AmazonLoginModal
+        C --> E[Create iframe];
+        E --> F[Load Amazon Login URL (by region)];
+        F --> G{Monitor iframe Navigation};
+        G -- Login Page Loaded --> G;
+        G -- Redirect to Cloud Reader URL? --> H{Login Success?};
+        H -- Yes --> I[Notify Success & Close];
+        H -- No (Error/Timeout/Other URL) --> J[Notify Failure & Close / Show Error];
+    end
+
+    I --> K[Update Plugin Login State];
+    J --> L[Show Error Notice];
+    K --> D;
+
+    M[User starts Logout] --> N[Show AmazonLogoutModal (Confirm)];
+    N --> O{Attempt Logout};
+
+    subgraph Logout Logic
+        O --> P[Navigate iframe to Logout URL];
+        P --> Q{Clear Internal Login State};
+        %% Consider fallback if P fails
+    end
+    Q --> R[Show Logout Confirmation Notice];
+
+    D --> S[KindleApiService uses Session Cookies];
+    S --> T[Fetch Data from Cloud Reader];
+    T --> U[Parse & Save Highlights];
 ```
 
-**Next Action:** Switch to Code mode to begin implementation based on this plan.
+## Key Risks & Considerations
+
+*   **Cross-Origin Restrictions:** Accessing `iframe.contentWindow.location` might be blocked.
+*   **Cookie Access/Usage:** Relying on `requestUrl` to automatically use `iframe`-set cookies needs verification.
+*   **Logout Reliability:** Clearing cookies effectively via `iframe` navigation is uncertain.
+*   **Scraping Brittleness:** Data fetching logic might break if Amazon changes the Cloud Reader UI.

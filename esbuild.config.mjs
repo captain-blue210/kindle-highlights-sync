@@ -1,4 +1,3 @@
-// esbuild.config.mjs
 import builtins from "builtin-modules";
 import esbuild from "esbuild";
 import process from "process";
@@ -45,8 +44,6 @@ const buildOptions = {
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
-		"puppeteer-core", // Add puppeteer-core
-		"@puppeteer/browsers", // Add @puppeteer/browsers
 		...builtins,
 	],
 	format: "cjs",
