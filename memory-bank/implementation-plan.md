@@ -1,102 +1,55 @@
-# Implementation Plan: Amazon Cloud Reader Login Feature (2025-03-29)
+# 実行計画：Kindle Cloud Reader HTML取得と解析 (推奨IPC版)
 
-## Goal
+**最終更新日:** 2025-03-30
 
-Enable users to log into their Amazon account within Obsidian and utilize that session to synchronize Kindle highlights.
+**目標:** `KindleApiService` 内で、Electron の `BrowserWindow` を利用して Kindle Cloud Reader のページの `<body>` 内 HTML を取得し、`cheerio` で解析可能にする。**安全なIPCメカニズムを使用する。**
 
-## Key Components
+**前提:**
 
-*   **`AmazonLoginModal`**: Modal embedding the Amazon login page via `iframe` and handling authentication.
-*   **`AmazonLogoutModal`**: Modal or prompt for handling logout.
-*   **`KindleApiService`**: Service managing login state, communication with Amazon (login, data fetching).
-*   **`SettingsTab`**: UI for Amazon region selection.
+*   認証プロセスは完了しており、Kindle Cloud Reader にログイン済みの `BrowserWindow` セッションが存在するか、アクセス可能である。
+*   Obsidianプラグイン（レンダラープロセス）とElectronメインプロセス間で安全な通信（IPC）を確立する必要がある。
 
-## Steps
+**ステップ:**
 
-1.  **Preparation:**
-    *   Add Amazon region setting (`com`, `co.jp`, etc.) to `settings.ts`.
-    *   Define region-specific login and Cloud Reader URLs (e.g., in `KindleApiService`).
+1.  **依存関係の追加:**
+    *   HTML解析ライブラリ `cheerio` をプロジェクトに追加します (`npm install cheerio @types/cheerio --save-dev`)。
+    *   Electron の型定義 (`@types/electron`) が必要になる場合があります（プロジェクトに既に入っているか確認）。
 
-2.  **`AmazonLoginModal` Implementation (`src/modals/AmazonLoginModal.ts`):**
-    *   Inherit from Obsidian `Modal`.
-    *   `onOpen()`: Create `iframe`, add to `contentEl`, set `src` to region-specific login URL.
-    *   Add CSS for `iframe` sizing.
-    *   `onClose()`: Clean up resources.
+2.  **IPCメカニズムの設計と実装 (`ElectronLayer`):**
+    *   **Preloadスクリプトの作成:**
+        *   `BrowserWindow` を作成する際に指定する `preload.js` (または `.ts`) ファイルを作成します。
+        *   このスクリプト内で `contextBridge` と `ipcRenderer` をインポートします。
+    *   **`contextBridge.exposeInMainWorld` の使用:**
+        *   Preloadスクリプト内で、レンダラープロセス（プラグインコード）から安全に呼び出せるAPIオブジェクト（例: `window.electronAPI`）を公開します。
+        *   このAPIオブジェクトには、メインプロセスと通信するための非同期関数を含めます（例: `loadUrl(url: string): Promise<void>`, `executeJavaScript(script: string): Promise<any>`, `getWindowId(): Promise<number | null>` など）。
+    *   **`ipcRenderer` の使用:**
+        *   公開する関数内で `ipcRenderer.invoke('channel-name', ...args)` を使用して、メインプロセスに処理を要求し、結果を待ちます。チャネル名（例: `'load-url'`, `'execute-js'`）を定義します。
+    *   **`ipcMain` の実装:**
+        *   メインプロセス側（Obsidianがどのようにメインプロセスコードの実行を許可するかに依存しますが、理想的にはObsidian本体か、信頼できる方法でロードされるコード内）で、`ipcMain.handle('channel-name', async (event, ...args) => { ... })` を使用して、`ipcRenderer` からの要求を待ち受けます。
+        *   ハンドラ内で、対応する `BrowserWindow` を特定し、要求された操作（`window.loadURL()`, `webContents.executeJavaScript()` など）を実行し、結果を返します。
+    *   **Obsidianとの連携:** このIPCメカニズム（特にメインプロセス側のハンドラ設定）をObsidianプラグインのライフサイクル内でどのようにセットアップするかが重要な課題となります。Obsidianが提供するAPIやベストプラクティスを確認する必要があります。
 
-3.  **Login Success Detection (`AmazonLoginModal`):**
-    *   Monitor `iframe` `load` event.
-    *   In handler, check `iframe.contentWindow.location.href` against region-specific Cloud Reader base URL.
-        *   **Risk:** Cross-origin restrictions might block access. Investigate alternatives if needed (e.g., indirect monitoring, manual confirmation).
-    *   On success: Close modal, notify caller (Promise/callback).
-    *   On failure: Notify caller/show error.
+3.  **`KindleApiService` (`src/services/kindle-api.ts`) の変更:**
+    *   `contextBridge` を介して公開されたAPI（例: `window.electronAPI`）を呼び出すようにコードを修正します。
+    *   新しい非同期メソッド `async getCloudReaderHtml(): Promise<string>` を追加します。
+    *   このメソッド内で、公開されたIPC関数（例: `window.electronAPI.executeJavaScript('document.body.innerHTML')`）を呼び出してHTML取得処理を実装します。
+    *   ページの読み込み完了待機なども、同様にIPC経由でメインプロセスに指示して行います（例: `window.electronAPI.waitForPageLoad()`）。
+    *   エラーハンドリング（IPCエラー、JS実行エラーなど）を実装します。
 
-4.  **Session Management (`KindleApiService`):**
-    *   Receive login success notification, update internal state flag.
-    *   **Hypothesis/Verification:** Assume/verify that `requestUrl` automatically uses cookies set in the `iframe` for same-domain requests.
-    *   Provide `isLoggedIn()` method.
+4.  **Cheerioでの解析:**
+    *   `getCloudReaderHtml` メソッドから返されたHTML文字列を `cheerio.load()` に渡して解析オブジェクトを生成します。
+    *   例:
+        ```typescript
+        import * as cheerio from 'cheerio';
+        // ... inside KindleApiService or where the HTML is used ...
+        const html = await this.getCloudReaderHtml(); // Assumes this uses the IPC layer
+        const $ = cheerio.load(html);
+        // Now '$' can be used to query the DOM
+        ```
 
-5.  **`AmazonLogoutModal` & Logout Logic (New):**
-    *   Create simple confirmation modal (`AmazonLogoutModal`).
-    *   On logout execution:
-        *   **Strategy 1 (Preferred):** Navigate an `iframe` (visible or hidden) to the Amazon logout URL to attempt cookie clearing.
-        *   **Strategy 2 (Fallback):** If Strategy 1 fails, reset internal plugin state only and inform the user (actual Amazon session might persist).
-    *   Update `KindleApiService` internal state.
+**次のステップ (Codeモード):**
 
-6.  **Plugin Integration (`main.ts`, `KindleApiService`):**
-    *   Add login/logout commands and ribbon icons.
-    *   On sync command: Check `KindleApiService.isLoggedIn()`.
-    *   If not logged in: Show `AmazonLoginModal`.
-    *   If logged in: Proceed with data fetching via `KindleApiService`.
-    *   Implement `login()`, `logout()`, `fetchHighlights()` interfaces in `KindleApiService`. `login()` triggers `AmazonLoginModal`.
-
-7.  **Data Fetching (`KindleApiService`):**
-    *   Implement logic to fetch highlights from Cloud Reader using the established session (expecting `requestUrl` to use cookies). This likely involves scraping or interacting with Cloud Reader's internal APIs.
-
-8.  **Error Handling & Testing:**
-    *   Implement robust error handling for all stages (login, logout, fetch).
-    *   Use `Notice` for user feedback.
-    *   Test thoroughly across regions, 2FA, failures, etc.
-
-## Flow Diagram
-
-```mermaid
-graph TD
-    A[User starts Sync/Login] --> B{Logged In?};
-    B -- No --> C[Show AmazonLoginModal];
-    B -- Yes --> D[Proceed to Fetch Highlights (KindleApiService)];
-
-    subgraph AmazonLoginModal
-        C --> E[Create iframe];
-        E --> F[Load Amazon Login URL (by region)];
-        F --> G{Monitor iframe Navigation};
-        G -- Login Page Loaded --> G;
-        G -- Redirect to Cloud Reader URL? --> H{Login Success?};
-        H -- Yes --> I[Notify Success & Close];
-        H -- No (Error/Timeout/Other URL) --> J[Notify Failure & Close / Show Error];
-    end
-
-    I --> K[Update Plugin Login State];
-    J --> L[Show Error Notice];
-    K --> D;
-
-    M[User starts Logout] --> N[Show AmazonLogoutModal (Confirm)];
-    N --> O{Attempt Logout};
-
-    subgraph Logout Logic
-        O --> P[Navigate iframe to Logout URL];
-        P --> Q{Clear Internal Login State};
-        %% Consider fallback if P fails
-    end
-    Q --> R[Show Logout Confirmation Notice];
-
-    D --> S[KindleApiService uses Session Cookies];
-    S --> T[Fetch Data from Cloud Reader];
-    T --> U[Parse & Save Highlights];
-```
-
-## Key Risks & Considerations
-
-*   **Cross-Origin Restrictions:** Accessing `iframe.contentWindow.location` might be blocked.
-*   **Cookie Access/Usage:** Relying on `requestUrl` to automatically use `iframe`-set cookies needs verification.
-*   **Logout Reliability:** Clearing cookies effectively via `iframe` navigation is uncertain.
-*   **Scraping Brittleness:** Data fetching logic might break if Amazon changes the Cloud Reader UI.
+*   ステップ1の依存関係を追加する。
+*   ステップ2のIPCメカニズムを設計・実装する (Preloadスクリプト、`contextBridge`、`ipcMain`ハンドラ)。
+*   ステップ3の`KindleApiService`を修正する。
+*   ステップ4のCheerio解析部分を実装する。

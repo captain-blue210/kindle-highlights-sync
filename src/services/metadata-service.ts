@@ -19,7 +19,7 @@ export async function fetchBookMetadata(
 		asin: book.id, // ASIN is the book ID from scraping
 		title: book.title,
 		author: book.author,
-		coverUrl: book.coverUrl, // Pass along coverUrl if scraped
+		imageUrl: book.imageUrl, // Use imageUrl instead of coverUrl
 	};
 
 	// --- Optional: Fetch additional data from external source ---

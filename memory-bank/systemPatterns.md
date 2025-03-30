@@ -1,79 +1,90 @@
-# System Patterns: Obsidian Kindle Highlights Sync
+# システムパターン: Obsidian Kindle Highlights Sync (日本語更新: 2025-03-30)
 
-## 1. Overall Architecture
+## 1. 全体アーキテクチャ
 
-The plugin follows a relatively simple, centralized architecture rather than adhering strictly to a formal design pattern like MVC or MVVM. The core `KindleHighlightsPlugin` class (`src/main.ts`) acts as the central orchestrator.
+プラグインは、MVCやMVVMのような形式的なデザインパターンに厳密に従うのではなく、比較的シンプルで中央集権的なアーキテクチャを採用しています。コアとなる`KindleHighlightsPlugin`クラス (`src/main.ts`) が中央のオーケストレーターとして機能します。
 
-## 2. Key Components & Interactions
+## 2. 主要コンポーネントとインタラクション
 
 ```mermaid
 graph TD
-    User --> ObsidianUI[Obsidian UI (Ribbon, Command Palette, Settings)]
+    User --> ObsidianUI[Obsidian UI (リボン, コマンドパレット, 設定)]
     ObsidianUI --> MainPlugin(KindleHighlightsPlugin / main.ts)
 
     subgraph Plugin Core
         MainPlugin --> SettingsTab(SettingsTab / settings.ts)
-        MainPlugin -->|Triggers Sync| SyncProcess{Sync Logic}
-        MainPlugin -->|Needs Login| LoginModal(AmazonLoginModal / modals/AmazonLoginModal.ts)
-        MainPlugin -->|Needs Logout| LogoutModal(AmazonLogoutModal / modals/AmazonLogoutModal.ts) -- Planned
-        MainPlugin -->|Displays Status| NoticeAPI[Obsidian Notice API]
+        MainPlugin -->|同期をトリガー| SyncProcess{同期ロジック}
+        MainPlugin -->|ログインが必要| LoginModal(AmazonLoginModal / modals/AmazonLoginModal.ts) ;; 独立ウィンドウ生成
+        MainPlugin -->|ログアウトが必要| LogoutProcess{ログアウトプロセス}
+        MainPlugin -->|ステータス表示| NoticeAPI[Obsidian Notice API]
 
         SyncProcess --> KindleAPI(KindleApiService / services/kindle-api.ts)
-        SyncProcess --> Parser(HighlightParser / services/highlight-parser.ts) -- Planned/Implicit
+        SyncProcess --> Parser(HighlightParser / services/highlight-parser.ts) ;; 計画中/暗黙的
         SyncProcess --> Renderer(TemplateRenderer / services/template-renderer.ts)
-        SyncProcess --> MetadataService(MetadataService / services/metadata-service.ts) -- Planned/Implicit
+        SyncProcess --> MetadataService(MetadataService / services/metadata-service.ts)
         SyncProcess --> VaultAPI[Obsidian Vault API]
 
-        KindleAPI -->|Fetches Data| AmazonCloudReader[Amazon Cloud Reader (via embedded view/requests)]
+        LoginModal -->|Electron BrowserWindow生成/管理| AmazonLoginWindow[Amazon Login (別ウィンドウ)] ;; electron.remote経由
+        LoginModal -->|成功/失敗(ウィンドウ参照含む)| MainPlugin
+
+        KindleAPI -->|データ取得指示(ウィンドウ参照使用)| RemoteLoader(loadRemoteDom / utils/remote-loader.ts)
+        RemoteLoader -->|コンテンツ操作/取得| AmazonLoginWindow ;; 既存ウィンドウ再利用
+        RemoteLoader -->|取得DOMを返す| KindleAPI
+
         Renderer --> VaultAPI
     end
 
-    SettingsTab --> MainPlugin -- Saves Settings
+    SettingsTab --> MainPlugin -- 設定保存
 
-    LoginModal -->|Handles Login| AmazonCloudReader
-    LoginModal -->|On Success/Failure| MainPlugin
-
-    LogoutModal -->|Handles Logout| MainPlugin -- Planned
+    LogoutProcess -->|セッションクリア指示?| KindleAPI ;; ログアウト処理はKindleAPIへ
+    LogoutProcess -->|完了通知| MainPlugin
 ```
 
 *   **`KindleHighlightsPlugin` (`src/main.ts`):**
-    *   The main entry point and central controller.
-    *   Initializes the plugin, loads settings, registers commands, adds ribbon icons, and sets up the settings tab.
-    *   Orchestrates the synchronization process, deciding when to show the login modal or proceed with fetching data.
-    *   Instantiates and interacts with various `Service` classes.
+    *   メインエントリポイントであり、中央コントローラー。
+    *   プラグインの初期化、設定の読み込み、コマンドの登録、リボンアイコンの追加、設定タブのセットアップを行う。
+    *   同期プロセスを調整し、`AmazonLoginModal` を呼び出して認証状態を確認・実行する。
+    *   様々な`Service`クラスをインスタンス化し、対話する。
 *   **`SettingsTab` (`src/settings.ts`):**
-    *   Provides the user interface for configuring plugin settings (e.g., Amazon region, note template, output folder).
-    *   Saves settings using Obsidian's data persistence mechanisms.
+    *   プラグイン設定（Amazonリージョン、ノートテンプレート、出力フォルダなど）のためのUIを提供する。
+    *   Obsidianのデータ永続化メカニズムを使用して設定を保存する。
 *   **`AmazonLoginModal` (`src/modals/AmazonLoginModal.ts`):**
-    *   Displays the Amazon login page within an embedded view (likely an `iframe`).
-    *   Monitors navigation within the embedded view to detect successful login (redirection to Kindle Cloud Reader URL).
-    *   Communicates login success or failure back to the `MainPlugin`.
-    *   Handles the storage or management of the session/cookies upon successful login (details TBD).
-*   **`AmazonLogoutModal` (Planned):**
-    *   Provides a confirmation or interface for logging out.
-    *   Triggers the clearing of session data (cookies).
-*   **Services (`src/services/`):**
-    *   **`KindleApiService` (`kindle-api.ts`):** Responsible for all communication related to Amazon, including managing the login state (session/cookies) and fetching data (books, highlights) from the Cloud Reader. This will likely involve interacting with the embedded view's content or making authenticated requests.
-    *   **`HighlightParser` (`highlight-parser.ts`):** Parses the raw data fetched from Kindle Cloud Reader into structured `Book` and `Highlight` models. (Functionality might be partially within `KindleApiService` initially).
-    *   **`TemplateRenderer` (`template-renderer.ts`):** Takes the structured data and user-defined templates to generate the Markdown content for Obsidian notes.
-    *   **`MetadataService` (`metadata-service.ts`):** Potentially handles fetching or enriching book metadata (e.g., cover images, author details) if not directly available from the primary highlight data source.
-*   **Models (`src/models/`):** Defines the data structures (`Book`, `Highlight`) used throughout the plugin.
+    *   `electron.remote` (Obsidian環境で利用可能な場合) を介して、独立したElectron `BrowserWindow` (`AmazonLoginWindow`) を生成・表示し、Amazonのログインページをロードする。
+    *   `BrowserWindow`内のナビゲーションを監視し、ログイン成功（Cloud Reader URLへのリダイレクトなど）を検出する。
+    *   ログイン成功時には、ウィンドウを閉じる代わりに**非表示**にし、そのウィンドウの参照を含む結果を返す。失敗時やキャンセル時には失敗ステータスのみを返す。
+*   **`KindleApiService` (`src/services/kindle-api.ts`):**
+    *   Amazon関連の通信全般を担当。
+    *   `login` メソッド内で `AmazonLoginModal` を呼び出し、成功時に返された `BrowserWindow` の参照 (`loginWindow`) を保持する。
+    *   `fetchHighlights` メソッド内で、保持している `loginWindow` を `loadRemoteDom` ユーティリティに渡し、Kindle Notebook ページのコンテンツを取得・解析する。
+    *   書籍やハイライトの情報を抽出するためのCSSセレクタとロジックを含む。
+    *   ログアウト処理（セッションクリアの試行）も担当する。
+*   **`loadRemoteDom` (`src/utils/remote-loader.ts`):**
+    *   指定されたURLを非表示の `BrowserWindow` で読み込むユーティリティ関数。
+    *   既存の `BrowserWindow` インスタンスを再利用するオプションを持つ。
+    *   ページの読み込み完了後、指定されたタイムアウト時間待機し、`body` の `innerHTML` を取得して Cheerio オブジェクトとして返す。
+    *   User-Agent の設定やエラーハンドリング、タイムアウト処理を行う。
+*   **Services (`src/services/` 内のその他):**
+    *   **`HighlightParser` (`highlight-parser.ts`):** (現状未使用) Kindle Cloud Readerから取得した生データを、構造化された`Book`および`Highlight`モデルに解析する責務を持つ（現在は `KindleApiService` 内で直接処理）。
+    *   **`TemplateRenderer` (`template-renderer.ts`):** 構造化されたデータとユーザー定義のテンプレートを受け取り、Obsidianノート用のMarkdownコンテンツを生成する。
+    *   **`MetadataService` (`metadata-service.ts`):** 主に `KindleApiService` で取得した書籍情報（ASINなど）を構造化する。将来的には外部APIから追加情報を取得する可能性もある。
+*   **Models (`src/models/`):** プラグイン全体で使用されるデータ構造（`Book`, `Highlight`）を定義する。
 
-## 3. Design Decisions & Patterns
+## 3. 設計上の決定とパターン
 
-*   **Centralized Control:** Logic flows primarily from the `MainPlugin` class.
-*   **Service Layer:** Functionality is grouped into services (API, Parsing, Rendering) to promote separation of concerns, although the boundaries might evolve.
-*   **Modal-based Authentication:** User interaction for login/logout is handled via dedicated Modals.
-*   **Configuration via Settings:** Plugin behavior is customized through the standard Obsidian settings tab.
-*   **Asynchronous Operations:** Interactions with APIs (Obsidian, Amazon) and file system operations are asynchronous, likely using `async/await`. Error handling for these operations is crucial.
+*   **中央集権的制御:** ロジックは主に`MainPlugin`クラスから流れる。
+*   **サービスレイヤー:** 機能はサービス（API, Parsing, Rendering, Metadata）にグループ化され、関心の分離を促進する。
+*   **`BrowserWindow`ベースの認証/データ取得:** ログインとデータ取得は、`electron.remote` を介して生成・管理される独立した非表示のElectronウィンドウで行われる。このウィンドウはログイン後も保持され、再利用される。
+*   **設定による構成:** プラグインの動作は、標準のObsidian設定タブを通じてカスタマイズされる。
+*   **非同期操作:** API（Obsidian, Amazon）との対話やファイルシステム操作は非同期であり、`async/await`を使用する。
+*   **ユーティリティ関数:** `BrowserWindow` の操作ロジックは `loadRemoteDom` にカプセル化される。
 
-## 4. State Management
+## 4. 状態管理
 
-*   Plugin settings are managed via `loadData()` and `saveData()` provided by the Obsidian API.
-*   Authentication state (e.g., session cookies, login status) needs to be managed, likely within the `KindleApiService` or potentially stored securely using Obsidian's mechanisms if appropriate, although the current plan involves relying on the implicit session maintained by the embedded view context.
+*   プラグイン設定は、Obsidian APIが提供する`loadData()`および`saveData()`を介して管理される。
+*   認証状態 (`loggedIn` フラグ) とログインに使用した `BrowserWindow` の参照 (`loginWindow`) は `KindleApiService` 内で管理される。Electronのセッション（Cookieなど）は `BrowserWindow` インスタンスに紐づいて維持される。
 
-## 5. Error Handling
+## 5. エラーハンドリング
 
-*   Errors during API calls, parsing, or file writing should be caught gracefully.
-*   User-facing errors should be reported via Obsidian's `Notice` API.
-*   Login failures need specific handling within the `AmazonLoginModal`.
+*   `loadRemoteDom` 内でURL読み込み失敗やタイムアウトを処理する。
+*   `KindleApiService` 内でログイン失敗、リージョン無効、コンテンツ解析失敗などを処理し、`Notice` APIでユーザーに通知する。
+*   `AmazonLoginModal` 内でウィンドウ生成失敗などを処理する。

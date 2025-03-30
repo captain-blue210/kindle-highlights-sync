@@ -1,48 +1,31 @@
-# Active Context: Obsidian Kindle Highlights Sync (2025-03-29)
+# アクティブコンテキスト (日本語更新: 2025-03-30)
 
-## 1. Current Focus
+## 1. 現在のフォーカス
 
-The immediate focus is on **implementing the Amazon Kindle Cloud Reader authentication mechanism** within the Obsidian plugin. This involves:
+*   Kindle Cloud Reader のノートブックページから書籍情報とハイライト情報を取得する機能の実装とデバッグ。
+*   特に、Electron の `BrowserWindow` を利用したHTML取得と、取得したHTMLからのデータ抽出（パース）に焦点を当てている。
 
-*   Creating and refining the `AmazonLoginModal`.
-*   Embedding the Amazon login page securely within the modal.
-*   Detecting successful login by monitoring URL redirection within the embedded view.
-*   Establishing and potentially managing the user's Amazon session (cookies) for subsequent API calls or data scraping.
-*   Implementing the corresponding logout functionality (`AmazonLogoutModal` and session clearing).
+## 2. 最近の主な変更点
 
-## 2. Recent Changes
+*   **HTML取得方法の変更:** Obsidian標準の `requestUrl` から、`electron.remote` を介して `BrowserWindow` を生成・操作する方式に変更 (`src/utils/remote-loader.ts`, `src/modals/AmazonLoginModal.ts`)。
+*   **ログインウィンドウの永続化:** ログイン成功時に `BrowserWindow` を閉じる代わりに非表示にし、`KindleApiService` で参照を保持するように変更。
+*   **動的コンテンツ読み込みへの対応:** `loadRemoteDom` ヘルパー関数にタイムアウトを追加し、ノートブックページのコンテンツが完全に読み込まれるのを待機するようにした（現在5秒）。
+*   **書籍情報パーサーの拡張:** サンプルコードを参考に、`KindleApiService` 内の書籍情報抽出ロジックを更新し、ASIN, タイトル, 著者, 画像URL, 最終更新日を取得するようにした。
+*   **日付処理:** `moment` ライブラリを導入し、日本語を含む日付文字列をパースするヘルパー関数 (`parseToDateString`) を追加。
+*   **モデル更新と型エラー修正:** `Book` モデルに必要なフィールドを追加し、関連する型エラーを修正。
+*   **ビルド設定:** `tsconfig.json` に `esModuleInterop: true` を追加し、`moment` のインポート警告を解消。
 
-*   Established the core Memory Bank documents:
-    *   `projectbrief.md`
-    *   `productContext.md`
-    *   `techContext.md`
-    *   `systemPatterns.md`
-*   Clarified project goals, user experience priorities (simplicity), technical stack, and basic system architecture.
+## 3. 現在の決定事項・考慮事項
 
-## 3. Next Steps (High-Level Plan for Login Feature)
+*   **`electron.remote` の利用:** 実装の簡便性から `electron.remote` を利用しているが、非推奨である点とObsidian環境での将来的な互換性のリスクを認識している。
+*   **動的読み込み待機:** 5秒のタイムアウトでコンテンツ読み込みは成功しているが、これが常に安定するかは不明。より堅牢な待機方法（特定の要素の出現を監視するなど）の検討も将来的には必要かもしれない。
+*   **CSSセレクタの依存性:** 現在のCSSセレクタはAmazon側のUI変更に弱い。
+*   **エラーハンドリング:** ログイン失敗、セッション切れ、コンテンツ取得失敗、パース失敗など、各段階でのエラーハンドリングは引き続き重要。
 
-1.  **Develop `AmazonLoginModal`:**
-    *   Create the basic modal structure using Obsidian API (`Modal`).
-    *   Embed an `iframe` within the modal's content area.
-    *   Load the appropriate Amazon login URL based on the user's selected region (from settings).
-2.  **Implement Login Detection:**
-    *   Add event listeners to the `iframe` to monitor `load` or navigation events.
-    *   Check the URL of the loaded page within the `iframe`.
-    *   If the URL matches the expected Kindle Cloud Reader URL for the region, consider the login successful.
-3.  **Handle Session:**
-    *   Determine how the session (cookies) established within the `iframe` context can be leveraged for subsequent data fetching by `KindleApiService`. (This might involve Obsidian's `requestUrl` capabilities or potentially interacting with the `iframe`'s content window if security policies allow).
-    *   Communicate login success/status back to the main plugin/service.
-4.  **Develop Logout Functionality:**
-    *   Create `AmazonLogoutModal` (potentially just a confirmation).
-    *   Implement logic to clear relevant cookies or session data. This is complex due to the `iframe` context and browser security. Research needed on effective methods within Obsidian's environment (e.g., navigating the iframe to a logout URL, attempting to clear cookies via specific APIs if available).
-5.  **Integrate with `KindleApiService`:** Ensure the service can check the login status and utilize the established session.
-6.  **Refine Settings:** Add settings for Amazon region selection if not already present.
-7.  **Testing:** Thoroughly test login/logout across different regions and scenarios (e.g., incorrect password, 2FA).
+## 4. 次のステップ
 
-## 4. Active Decisions & Considerations
-
-*   **Session Management:** How exactly will the session established in the `iframe` be accessed and used by the plugin's background processes/services? Are there security limitations within Obsidian/Electron regarding cross-context cookie access? Will `requestUrl` automatically use these cookies if the requests target the same domain? *Further investigation required.*
-*   **Logout Mechanism:** What is the most reliable way to clear the Amazon session cookies from within the Obsidian plugin context, given they were likely set within an `iframe`? *Further investigation required.*
-*   **WebView Component:** The initial request mentioned "WebView (または同等のコンポーネント)". Obsidian Modals typically use standard HTML DOM. We will use an `iframe` as the standard way to embed external web content within this structure.
-*   **Error Handling:** Define specific error handling for login failures (wrong credentials, network issues, Amazon changes login flow).
-*   **Region Handling:** Ensure login URLs and Cloud Reader redirect URLs are correctly mapped for different Amazon regions (.com, .co.jp, .de, .co.uk, etc.).
+*   **ハイライト抽出ロジックの確認・修正:** 書籍情報は取得できるようになったが、ハイライト情報 (`Highlight` モデル) の抽出ロジック (`KindleApiService` 内の `$(HIGHLIGHT_CONTAINER_SELECTOR).each(...)`) が現在のHTML構造で正しく機能するか確認し、必要であれば修正する。
+*   **リージョン対応の強化:** 現在ハードコードされている部分（例: `parseToDateString` のデフォルト、書籍URL生成）を、設定から取得したリージョン情報に基づいて動的に変更できるようにする。
+*   **リファクタリング:** `KindleApiService` 内のパースロジックを、当初の計画通り `HighlightParser` サービスに分離することを検討する。
+*   **テスト:** 異なるAmazonアカウント、異なる書籍、ハイライトがない場合など、様々なケースで動作確認を行う。
+*   **ログアウト処理の改善:** 現在のiframeベースのログアウトはベストエフォートであり、保持している `BrowserWindow` のセッションを確実にクリアする方法（`webContents.session.clearStorageData()` など）を検討・実装する。

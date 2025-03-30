@@ -1,54 +1,62 @@
-# Tech Context: Obsidian Kindle Highlights Sync
+# 技術コンテキスト: Obsidian Kindle Highlights Sync (日本語更新: 2025-03-30)
 
-## 1. Core Technologies
+## 1. コア技術
 
-*   **Language:** TypeScript - Provides static typing for improved code quality and maintainability.
-*   **Runtime:** Node.js - Used for dependency management (npm) and build processes.
-*   **Framework:** Obsidian Plugin API - Leverages the official API provided by Obsidian for extending its functionality.
+*   **言語:** TypeScript - 静的型付けによりコード品質と保守性を向上させる。
+*   **ランタイム:** Node.js - 依存関係管理（npm）とビルドプロセスに使用される。
+*   **フレームワーク:** Obsidian Plugin API - Obsidianの機能を拡張するために提供される公式APIを活用する。
+*   **基盤:** Electron - Obsidian自体が動作するフレームワーク。**認証とデータ取得のために、プラグインのレンダラープロセスから `electron.remote` モジュール（`window.require`経由でアクセス試行）を利用してElectronの`BrowserWindow` APIを呼び出す。** これはElectronの推奨アプローチではないが、Obsidianプラグイン環境での実装を簡略化するために採用。
 
-## 2. Build & Development Tools
+## 2. ビルド＆開発ツール
 
-*   **Bundler:** esbuild - Used for fast TypeScript compilation and bundling of the plugin code into `main.js`. Configured via `esbuild.config.mjs`.
-*   **Package Manager:** npm - Manages project dependencies listed in `package.json` and `package-lock.json`.
-*   **Linter:** ESLint - Enforces code style and identifies potential errors. Configured via `.eslintrc`.
-*   **Configuration:**
-    *   `tsconfig.json`: Configures TypeScript compiler options.
-    *   `.editorconfig`: Helps maintain consistent coding styles across different editors.
-    *   `.gitignore`: Specifies intentionally untracked files for Git.
+*   **バンドラ:** esbuild - 高速なTypeScriptコンパイルとプラグインコードの`main.js`へのバンドルに使用される。`esbuild.config.mjs`で設定。
+*   **パッケージマネージャ:** npm - `package.json`および`package-lock.json`にリストされたプロジェクトの依存関係を管理する。
+*   **リンター:** ESLint - コードスタイルを強制し、潜在的なエラーを特定する。`.eslintrc`で設定。
+*   **設定ファイル:**
+    *   `tsconfig.json`: TypeScriptコンパイラオプションを設定。`esModuleInterop: true` が有効化されている。
+    *   `.editorconfig`: 異なるエディタ間で一貫したコーディングスタイルを維持するのに役立つ。
+    *   `.gitignore`: Gitで意図的に追跡しないファイルを指定。
 
-## 3. Key Obsidian API Components Used (Inferred)
+## 3. 使用される主要なObsidian APIコンポーネント（推測）
 
-Based on the file structure (`src/main.ts`, `src/settings.ts`, `src/modals/AmazonLoginModal.ts`) and common plugin patterns, the following Obsidian API components are likely used or planned:
+*   `Plugin`: Obsidianプラグインのベースクラス (`main.ts`)。
+*   `PluginSettingTab`, `Setting`: プラグインの設定インターフェースを作成するため (`settings.ts`)。
+*   `Notice`: ユーザーへの短い通知（同期成功/失敗など）を表示するため。
+*   Obsidian Commands API: 同期やログアウトをトリガーするためのコマンドを登録するため。
+*   Ribbon Icon API: 同期をトリガーするためのリボンアイコンを追加するため (未実装)。
+*   `requestUrl`: (現状未使用) 将来的に他のAPI連携で使用される可能性あり。
 
-*   `Plugin`: The base class for the Obsidian plugin (`main.ts`).
-*   `PluginSettingTab`, `Setting`: For creating the plugin's settings interface (`settings.ts`).
-*   `Modal`: Used for displaying modal windows, specifically the `AmazonLoginModal` for the login process. This modal will likely embed the Amazon login page using an `<iframe>`.
-*   `Notice`: For displaying brief notifications to the user (e.g., sync success/failure).
-*   `requestUrl`: Potentially used for making HTTP requests to fetch Kindle data after authentication (`services/kindle-api.ts`), although the primary data fetching might involve interacting with the content loaded after login within the Cloud Reader context.
-*   Obsidian Commands API: To register commands for triggering sync (e.g., via Command Palette).
-*   Ribbon Icon API: To add a ribbon icon for triggering sync.
+## 4. プロジェクト構造
 
-## 4. Project Structure
+*   `src/`: すべてのソースコードを含む。
+    *   `main.ts`: プラグインエントリポイント。
+    *   `settings.ts`: プラグイン設定を処理。
+    *   `modals/`: モーダルコンポーネント定義 (`AmazonLoginModal`, `AmazonLogoutModal`)。
+    *   `models/`: データ構造 (`Book`, `Highlight`) を定義。`Book` には `asin`, `url`, `imageUrl`, `lastAnnotatedDate` が追加された。
+    *   `services/`: 特定の機能（API対話, メタデータ処理, レンダリング）をカプセル化。
+    *   `templates/`: Obsidianノート生成用のテンプレートを含む。
+    *   `utils/`: 汎用的なユーティリティ関数 (`remote-loader.ts` など)。
+*   `manifest.json`: Obsidianが必要とするプラグインメタデータ。
+*   `versions.json`, `version-bump.mjs`: プラグインのバージョン管理に使用。
 
-*   `src/`: Contains all source code.
-    *   `main.ts`: Plugin entry point.
-    *   `settings.ts`: Handles plugin settings.
-    *   `modals/`: Contains modal component definitions.
-    *   `models/`: Defines data structures (e.g., `Book`, `Highlight`).
-    *   `services/`: Encapsulates specific functionalities (API interaction, parsing, rendering).
-    *   `templates/`: Contains templates for generating Obsidian notes.
-*   `manifest.json`: Plugin metadata required by Obsidian.
-*   `versions.json`, `version-bump.mjs`: Likely used for managing plugin versioning.
+## 5. 依存関係
 
-## 5. Dependencies
+*   **ランタイム:**
+    *   `obsidian`: Obsidian API。
+    *   `moment`: 日付処理ライブラリ (`parseToDateString` で使用)。
+    *   `cheerio`: HTML解析ライブラリ (`KindleApiService` で使用)。
+*   **開発:**
+    *   `typescript`, `esbuild`, `@types/node`, `@typescript-eslint/eslint-plugin`, `@typescript-eslint/parser`, `eslint` など。
+    *   `@types/cheerio`: Cheerioの型定義。
+    *   `@types/electron`: (現在は `^1.6.12` を使用) Electron APIの型定義。`remote` モジュールの型解決のために必要。
 
-*   Primary dependency is the `obsidian` API module.
-*   Development dependencies include `typescript`, `esbuild`, `@types/node`, `@typescript-eslint/eslint-plugin`, `@typescript-eslint/parser`, `eslint`.
-*   No major external runtime libraries are apparent in the current structure, but scraping libraries (like Cheerio) might be considered later for parsing Cloud Reader content if direct API calls are not feasible.
+## 6. 技術的制約と考慮事項
 
-## 6. Technical Constraints & Considerations
-
-*   **Obsidian API Limitations:** Plugin execution is sandboxed within Obsidian's environment. Direct access to certain system resources or complex browser APIs (like full Puppeteer control) might be restricted.
-*   **Authentication:** Relies on embedding the Amazon login page within a modal/iframe and capturing cookies/session information upon successful login redirect. This approach is sensitive to changes in Amazon's login flow.
-*   **Scraping:** Fetching highlights post-login will likely involve parsing the HTML structure of the Kindle Cloud Reader. This is inherently brittle and may break if Amazon updates the Cloud Reader's UI.
-*   **Security:** As noted in the initial request, the established Amazon session (cookies) might be accessible within the Obsidian environment.
+*   **`electron.remote` への依存:**
+    *   `remote` モジュールはElectronで非推奨であり、セキュリティリスクやパフォーマンスの問題がある。
+    *   Obsidianの将来のバージョンで `remote` モジュールへのアクセスが完全にブロックされる可能性がある。
+    *   `window.require('electron')` が常に機能する保証はない。
+*   **スクレイピングの脆弱性:** Kindle Cloud ReaderのHTML構造に依存しているため、Amazon側のUI変更によって機能が停止するリスクが高い。
+*   **動的コンテンツ:** ノートブックページのコンテンツは動的に読み込まれるため、`loadRemoteDom` 内で適切な待機時間（現在は5秒）が必要。この時間は環境によって調整が必要になる可能性がある。
+*   **セッション管理:** ログインセッションは非表示の `BrowserWindow` インスタンスに依存している。ウィンドウが予期せず閉じられたり、セッションが期限切れになったりした場合のハンドリングが必要。
+*   **エラーハンドリング:** ネットワークエラー、ログイン失敗、HTML構造の変更、パースエラーなど、様々なエラーケースを考慮する必要がある。

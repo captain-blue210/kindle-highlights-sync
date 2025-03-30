@@ -1,7 +1,8 @@
-import * as cheerio from "cheerio";
-import { App, Notice, requestUrl } from "obsidian"; // Added App
+import moment from "moment"; // Revert to default import
+import { App, Notice } from "obsidian"; // Keep App, Notice
 import { AmazonLoginModal } from "../modals/AmazonLoginModal"; // Import the modal
 import { Book, Highlight } from "../models";
+import { loadRemoteDom } from "../utils/remote-loader"; // Add loadRemoteDom
 
 // --- Region URL Definitions --- (Keep outside class for now)
 
@@ -103,26 +104,69 @@ export function getRegionUrls(region: string): AmazonRegionUrls | undefined {
 	return REGION_URLS[region];
 }
 
+// Helper function to parse author string (from example)
+export const parseAuthor = (scrapedAuthor: string): string => {
+	// Example format: "著者: Author Name" or "By: Author Name"
+	// Removes prefix like "著者: " or "By: "
+	return (
+		scrapedAuthor?.replace(/^(著者:|By:)\s*/i, "")?.trim() ||
+		"Unknown Author"
+	);
+};
+
+// Helper function to parse date string (adapted from example with region handling)
+export const parseToDateString = (
+	kindleDate: string | undefined,
+	region: string
+): Date | null => {
+	if (!kindleDate) return null;
+
+	let date: moment.Moment;
+
+	switch (region) {
+		case "co.jp": {
+			// Example: "2025年3月29日 土曜日"
+			// Extract the date part before the day name
+			const datePart = kindleDate.substring(0, kindleDate.indexOf(" "));
+			// Use Japanese format (Year, Month, Day with Kanji)
+			date = moment(datePart, "YYYY年M月D日", "ja", true); // Use 'ja' locale and strict parsing
+			break;
+		}
+		// TODO: Add cases for other regions with specific formats (e.g., 'fr') if needed
+		default: {
+			// Default to English formats (handle full and abbreviated months)
+			// Example: "October 24, 2021" or "Mar 29, 2025"
+			date = moment(kindleDate, ["MMMM D, YYYY", "MMM DD, YYYY"], true); // Strict parsing
+			break;
+		}
+	}
+
+	return date.isValid() ? date.toDate() : null;
+};
+
 // --- Constants --- (Keep outside class)
 const USER_AGENT =
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36";
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"; // Re-add
 
 // --- CSS Selectors --- (Keep outside class)
-const BOOK_SELECTOR = ".kp-notebook-library-each-book";
-const BOOK_ASIN_ATTR = "data-asin";
-const BOOK_TITLE_SELECTOR = ".kp-notebook-library-book-title";
-const BOOK_AUTHOR_SELECTOR = ".kp-notebook-library-book-author";
-// const BOOK_COVER_SELECTOR = "img.kp-notebook-cover-image"; // Commented out - not currently used
+const BOOK_SELECTOR = ".kp-notebook-library-each-book"; // Main container for each book
+// const BOOK_ASIN_ATTR = "data-asin"; // Removed - ASIN extraction is more complex now
+const BOOK_TITLE_SELECTOR = "h2.kp-notebook-searchable"; // Updated based on example
+const BOOK_AUTHOR_SELECTOR = "p.kp-notebook-searchable"; // Updated based on example
+// const BOOK_COVER_SELECTOR = "img.kp-notebook-cover-image";
 const HIGHLIGHT_CONTAINER_SELECTOR =
-	".a-row.a-spacing-base.kp-notebook-highlight";
+	".a-row.a-spacing-base.kp-notebook-highlight"; // Assuming this is still correct
 const HIGHLIGHT_TEXT_SELECTOR = "#highlight";
 const HIGHLIGHT_NOTE_SELECTOR = "#note";
 const HIGHLIGHT_LOCATION_SELECTOR = "#annotationHighlightHeader";
 const HIGHLIGHT_ASIN_ATTR = "data-asin";
 
+import type { BrowserWindow } from "electron"; // Import BrowserWindow type
+
 export class KindleApiService {
 	private loggedIn = false; // Type inferred from literal
 	private app: App; // Store App instance
+	private loginWindow: BrowserWindow | null = null; // Store reference to the login window
 
 	constructor(app: App) {
 		this.app = app;
@@ -137,18 +181,48 @@ export class KindleApiService {
 	 * @param region The Amazon region code (e.g., 'com', 'co.jp').
 	 * @returns True if login was successful, false otherwise.
 	 */
+	// Return type remains boolean for external callers, but internally handles the window
 	public async login(region: string): Promise<boolean> {
 		console.log("KindleApiService: Initiating login...");
-		const loginModal = new AmazonLoginModal(region); // Removed this.app argument
-		const success = await loginModal.doLogin();
-		if (success) {
+		// Clean up any previous login window first
+		this.cleanupLoginWindow();
+
+		const loginModal = new AmazonLoginModal(region);
+		// Destructure the result from doLogin
+		const { success, window } = await loginModal.doLogin();
+
+		if (success && window) {
 			this.loggedIn = true;
-			console.log("KindleApiService: Login successful.");
+			this.loginWindow = window; // Store the window reference
+			console.log("KindleApiService: Login successful, window stored.");
 		} else {
-			this.loggedIn = false; // Ensure state is false on cancel/failure
+			this.loggedIn = false;
+			this.loginWindow = null; // Ensure window reference is cleared on failure
 			console.log("KindleApiService: Login cancelled or failed.");
+			// Ensure the window is cleaned up if login failed but window was somehow returned
+			if (window && !window.isDestroyed()) {
+				window.destroy();
+			}
 		}
-		return success;
+		return success; // Return only the success status
+	}
+
+	// Helper method to clean up the login window
+	private cleanupLoginWindow(): void {
+		if (this.loginWindow && !this.loginWindow.isDestroyed()) {
+			try {
+				this.loginWindow.destroy();
+				console.log(
+					"KindleApiService: Previous login window destroyed."
+				);
+			} catch (e) {
+				console.error(
+					"KindleApiService: Error destroying previous login window:",
+					e
+				);
+			}
+		}
+		this.loginWindow = null;
 	}
 
 	/**
@@ -225,121 +299,142 @@ export class KindleApiService {
 		);
 
 		try {
-			const response = await requestUrl({
-				url: notebookUrl,
-				method: "GET",
-				headers: {
-					"User-Agent": USER_AGENT,
-					Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-					"Accept-Language": "en-US,en;q=0.9",
-					// Cookies are expected to be handled implicitly by requestUrl/Electron session
-				},
-				throw: false,
-			});
-
-			console.log(
-				`KindleApiService: Scraping response status: ${response.status}`
-			);
-
-			// Check for potential redirect to login page (indicating invalid session)
-			if (response.status >= 300 && response.status < 400) {
-				const location = response.headers["location"];
-				if (location && location.includes("/ap/signin")) {
-					this.loggedIn = false; // Update state as session is invalid
-					throw new Error(
-						"Authentication failed or session expired. Please log in again."
-					);
-				}
-			}
-
-			if (response.status !== 200) {
-				// Could be a temporary error, don't necessarily invalidate login state yet
+			// Check if we have a valid login window stored
+			if (!this.loginWindow || this.loginWindow.isDestroyed()) {
 				throw new Error(
-					`Failed to fetch Kindle Notebook page. Status: ${response.status}`
+					"Kindle session window is not available. Please log in again."
 				);
 			}
 
-			const html = response.text;
-			const $ = cheerio.load(html);
+			// Use loadRemoteDom, passing the existing window and user agent
+			const {
+				dom: $,
+				finalUrl,
+				// html, // Remove unused html variable
+			} = await loadRemoteDom(
+				notebookUrl,
+				USER_AGENT, // Pass user agent
+				5000, // Keep increased timeout
+				this.loginWindow
+			);
+			console.log(
+				`KindleApiService: Successfully loaded/reused DOM from ${finalUrl}`
+			);
+			// Optional: Log HTML only if needed for deep debugging
+			// console.log("--- Kindle Notebook HTML Start ---");
+			// console.log(html);
+			// console.log("--- Kindle Notebook HTML End ---");
 
+			// --- Restore Parsing Logic ---
 			const books: Book[] = [];
 			const highlights: Highlight[] = [];
 
-			// --- Parse Books --- (Logic remains the same as before)
-			$(BOOK_SELECTOR).each((_index, element) => {
-				const bookElement = $(element);
-				const id = bookElement.attr(BOOK_ASIN_ATTR);
-				const title = bookElement
-					.find(BOOK_TITLE_SELECTOR)
-					.text()
-					?.trim();
-				const author =
-					bookElement
-						.find(BOOK_AUTHOR_SELECTOR)
+			// Parse Books
+			$(BOOK_SELECTOR).each(
+				(_index: number, element: cheerio.Element) => {
+					const bookElement = $(element);
+					// Get ASIN from the element's ID attribute
+					const asin = bookElement.attr("id"); // Use 'asin' variable name
+					// Use updated selectors
+					const title = bookElement
+						.find(BOOK_TITLE_SELECTOR)
 						.text()
-						?.trim()
-						.replace(/^By\s+/i, "") || "Unknown Author";
-				// const coverUrl = bookElement // Commented out to fix unused variable warning
-				// 	.find(BOOK_COVER_SELECTOR)
-				// 	.attr("src"); // Keep parsing, even if unused for now
-
-				if (id && title) {
-					books.push({ id, title, author /* coverUrl */ });
-				} else {
-					console.warn(
-						"Skipping book element due to missing ID or Title:",
-						bookElement.html()
+						?.trim();
+					// Use updated selector and parseAuthor helper
+					const scrapedAuthor = bookElement
+						.find(BOOK_AUTHOR_SELECTOR)
+						.text();
+					const author = parseAuthor(scrapedAuthor);
+					// Extract imageUrl
+					const imageUrl = bookElement
+						.find(".kp-notebook-cover-image")
+						.attr("src");
+					// Extract and parse lastAnnotatedDate
+					const scrapedLastAnnotatedDate = bookElement
+						.find('[id^="kp-notebook-annotated-date"]')
+						.val() as string | undefined;
+					const lastAnnotatedDate = parseToDateString(
+						scrapedLastAnnotatedDate,
+						region // Pass region argument
 					);
+					// Construct URL (assuming .com for now, needs region later)
+					// TODO: Use region-specific domain from settings or regionUrls
+					const url = `https://www.amazon.com/dp/${asin}`;
+
+					if (asin && title) {
+						// Add all extracted fields to the book object
+						books.push({
+							id: asin,
+							title,
+							author,
+							asin,
+							url,
+							imageUrl,
+							lastAnnotatedDate,
+						});
+					} else {
+						console.warn(
+							"Skipping book element due to missing ASIN or Title:", // Update warning message
+							`ASIN: ${asin}, Title: ${title}`, // Log extracted values
+							bookElement.html() // Log full element HTML for context
+						);
+					}
 				}
-			});
+			);
 			console.log(`KindleApiService: Parsed ${books.length} books.`);
 
-			// --- Parse Highlights --- (Logic remains the same as before)
-			$(HIGHLIGHT_CONTAINER_SELECTOR).each((_index, element) => {
-				const highlightElement = $(element);
-				const bookId = highlightElement.attr(HIGHLIGHT_ASIN_ATTR);
-				const text = highlightElement
-					.find(HIGHLIGHT_TEXT_SELECTOR)
-					.text()
-					?.trim();
-				const note =
-					highlightElement
-						.find(HIGHLIGHT_NOTE_SELECTOR)
+			// Parse Highlights
+			$(HIGHLIGHT_CONTAINER_SELECTOR).each(
+				(_index: number, element: cheerio.Element) => {
+					// Add types
+					const highlightElement = $(element);
+					const bookId = highlightElement.attr(HIGHLIGHT_ASIN_ATTR);
+					const text = highlightElement
+						.find(HIGHLIGHT_TEXT_SELECTOR)
 						.text()
-						?.trim() || undefined;
-				const locationHeader = highlightElement
-					.find(HIGHLIGHT_LOCATION_SELECTOR)
-					.text()
-					?.trim();
-				const location = locationHeader || "Unknown Location";
-				let page: number | undefined;
-				const pageMatch = location.match(/page (\d+)/i);
-				if (pageMatch) {
-					page = parseInt(pageMatch[1], 10);
-				}
-				const id = `highlight-${bookId}-${_index}`;
+						?.trim();
+					const note =
+						highlightElement
+							.find(HIGHLIGHT_NOTE_SELECTOR)
+							.text()
+							?.trim() || undefined;
+					const locationHeader = highlightElement
+						.find(HIGHLIGHT_LOCATION_SELECTOR)
+						.text()
+						?.trim();
+					const location = locationHeader || "Unknown Location";
+					let page: number | undefined;
+					const pageMatch = location.match(/page (\d+)/i);
+					if (pageMatch) {
+						page = parseInt(pageMatch[1], 10);
+					}
+					const id = `highlight-${bookId}-${_index}`; // Simple ID generation
 
-				if (bookId && text) {
-					highlights.push({ id, bookId, text, location, page, note });
-				} else {
-					console.warn(
-						"Skipping highlight element due to missing Book ID or Text:",
-						highlightElement.html()
-					);
+					if (bookId && text) {
+						highlights.push({
+							id,
+							bookId,
+							text,
+							location,
+							page,
+							note,
+						});
+					} else {
+						console.warn(
+							"Skipping highlight element due to missing Book ID or Text:",
+							highlightElement.html()
+						);
+					}
 				}
-			});
+			);
 			console.log(
 				`KindleApiService: Parsed ${highlights.length} highlights.`
 			);
 
-			if (
-				books.length === 0 &&
-				highlights.length === 0 &&
-				response.text.length > 0
-			) {
-				// Check response text length to avoid false positives on empty responses
+			// Check if nothing was parsed despite successful load
+			if (books.length === 0 && highlights.length === 0) {
 				console.warn(
-					"No books or highlights found on the notebook page. Structure might have changed?"
+					"No books or highlights found after parsing the notebook page. Structure might have changed?"
 				);
 				new Notice(
 					"Could not find any books or highlights on the Kindle Notebook page. The page structure might have changed, or there might be no highlights."
@@ -349,7 +444,7 @@ export class KindleApiService {
 			return { books, highlights };
 		} catch (error) {
 			console.error(
-				"KindleApiService: Error fetching highlights:",
+				"KindleApiService: Error fetching highlights:", // Restore original error context
 				error
 			);
 			// Don't automatically log out on fetch errors, could be temporary

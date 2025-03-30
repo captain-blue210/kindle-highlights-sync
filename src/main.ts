@@ -139,9 +139,10 @@ export default class KindleHighlightsPlugin extends Plugin {
 				);
 				// Assign the fetched/structured metadata back to the book object
 				book.metadata = metadata;
-				// Optionally update coverUrl if it was fetched
-				if (metadata.coverUrl) {
-					book.coverUrl = metadata.coverUrl;
+				// Optionally update imageUrl if it was fetched
+				if (metadata.imageUrl) {
+					// Check for imageUrl
+					book.imageUrl = metadata.imageUrl; // Assign to imageUrl
 				}
 			} catch (error) {
 				console.warn(
