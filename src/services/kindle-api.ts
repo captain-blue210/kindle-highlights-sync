@@ -162,8 +162,8 @@ const BOOK_LAST_ANNOTATED_SELECTOR = '[id^="kp-notebook-annotated-date"]'; // Ad
 const HIGHLIGHT_CONTAINER_SELECTOR = ".a-row.a-spacing-base"; // Reference uses this as the base row
 const HIGHLIGHT_TEXT_SELECTOR = "#highlight"; // Reference uses ID
 const HIGHLIGHT_NOTE_SELECTOR = "#note"; // Reference uses ID
-const HIGHLIGHT_LOCATION_SELECTOR = "#kp-annotation-location"; // Reference uses this ID for location value
-const HIGHLIGHT_PAGE_HEADER_SELECTOR = "#annotationNoteHeader"; // Reference uses this for page number text
+const HIGHLIGHT_LOCATION_SELECTOR = "#kp-annotation-location"; // Reference uses this ID for location value - RESTORED
+// Removed unused HIGHLIGHT_PAGE_HEADER_SELECTOR
 const HIGHLIGHT_COLOR_SELECTOR = ".kp-notebook-highlight"; // Reference uses this class on a child element for color
 const PAGINATION_TOKEN_SELECTOR = ".kp-notebook-annotations-next-page-start"; // Reference selector
 const PAGINATION_LIMIT_STATE_SELECTOR = ".kp-notebook-content-limit-state"; // Reference selector
@@ -285,12 +285,7 @@ export class KindleApiService {
 				// Find elements relative to the container
 				const textElement = element.find(HIGHLIGHT_TEXT_SELECTOR);
 				const noteElement = element.find(HIGHLIGHT_NOTE_SELECTOR);
-				const locationElement = element.find(
-					HIGHLIGHT_LOCATION_SELECTOR
-				);
-				const pageHeaderElement = element.find(
-					HIGHLIGHT_PAGE_HEADER_SELECTOR
-				);
+				// Removed unused locationElement and pageHeaderElement declarations
 				const colorElement = element.find(HIGHLIGHT_COLOR_SELECTOR); // Find the element with color class
 
 				const text = textElement.text()?.trim();
@@ -303,10 +298,19 @@ export class KindleApiService {
 					return null;
 				}
 
+				// Reverted location extraction: Use the correct ID selector and .val() based on user feedback
+				const locationElement = element.find(
+					HIGHLIGHT_LOCATION_SELECTOR
+				);
 				const location =
-					(locationElement.val() as string) || "Unknown Location"; // Get value from input
-				const pageHeader = pageHeaderElement.text()?.trim();
-				const pageMatch = pageHeader?.match(/page (\d+)/i); // Match against header text
+					(locationElement.val() as string) || "Unknown Location";
+
+				// Updated page number extraction: Use a guessed class selector
+				const pageText = element
+					.find(".kp-annotation-page-text") // Guessed selector
+					.text()
+					?.trim();
+				const pageMatch = pageText?.match(/page (\d+)/i); // Keep regex for now
 				const page = pageMatch ? parseInt(pageMatch[1], 10) : undefined;
 
 				const highlightClasses = colorElement.attr("class"); // Get classes from the specific color element
