@@ -55,7 +55,7 @@ graph TD
 *   **`KindleApiService` (`src/services/kindle-api.ts`):**
     *   Amazon関連の通信全般を担当。
     *   `login` メソッド内で `AmazonLoginModal` を呼び出し、成功時に返された `BrowserWindow` の参照 (`loginWindow`) を保持する。
-    *   `fetchHighlights` メソッド内で、保持している `loginWindow` を `loadRemoteDom` ユーティリティに渡し、Kindle Notebook ページのコンテンツを取得・解析する。
+    *   `fetchHighlights` メソッド内で、保持している `loginWindow` を `loadRemoteDom` ユーティリティに渡し、Kindle Notebook ページのコンテンツを取得・解析する (**注: 現在、書籍とハイライトの両方の解析ロジックがこのサービス内に実装されています**)。
     *   書籍やハイライトの情報を抽出するためのCSSセレクタとロジックを含む。
     *   ログアウト処理（セッションクリアの試行）も担当する。
 *   **`loadRemoteDom` (`src/utils/remote-loader.ts`):**
