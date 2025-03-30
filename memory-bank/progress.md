@@ -1,45 +1,58 @@
-# Progress: Obsidian Kindle Highlights Sync (2025-03-29)
+# 進捗状況 (日本語更新: 2025-03-30)
 
-## 1. What Works
+## 1. 機能していること
 
-*   **Basic Plugin Structure:** The fundamental Obsidian plugin structure (`main.ts`, `manifest.json`, settings tab via `settings.ts`) is in place.
-*   **Build Process:** The project can be built using TypeScript and esbuild.
-*   **Core Service Stubs:** Service files for API interaction (`kindle-api.ts`), parsing (`highlight-parser.ts`), rendering (`template-renderer.ts`), and metadata (`metadata-service.ts`) exist, outlining the intended separation of concerns.
-*   **Data Models:** Basic data models for `Book` and `Highlight` (`models/`) are defined.
-*   **Memory Bank:** Core documentation files (`projectbrief.md`, `productContext.md`, `techContext.md`, `systemPatterns.md`, `activeContext.md`) have been established.
+*   **Amazon認証:**
+    *   指定されたAmazonリージョンのログインページを独立した `BrowserWindow` で表示できる。
+    *   ログイン成功を検出し、ウィンドウを非表示にして参照を保持できる (`AmazonLoginModal`)。
+    *   `KindleApiService` がログイン状態 (`loggedIn`) とウィンドウ参照 (`loginWindow`) を管理できる。
+*   **ノートブックページへのアクセス:**
+    *   ログイン時に保持した `BrowserWindow` を再利用して、Kindle Notebook ページ (`read.amazon.com/notebook` など) にアクセスできる (`loadRemoteDom`)。
+    *   User-Agent を設定してアクセスできる。
+*   **コンテンツの動的読み込み待機:**
+    *   `loadRemoteDom` 内でタイムアウトを設定し、ページの初期読み込み後に待機することで、JavaScriptによる動的コンテンツ（書籍リストなど）の読み込みを待機できる（現在は5秒）。
+    *   コンテンツ（`.kp-notebook-library-each-book`）が存在するかどうかを確認できる。
+*   **書籍情報の抽出:**
+    *   読み込んだノートブックページのHTMLから、書籍の基本情報（ASIN/ID, タイトル, 著者, 画像URL, 最終更新日）を抽出できる (`KindleApiService` 内のパーサー）。
+    *   日付文字列を `moment` を使ってパースできる（日本語形式対応済み）。
+*   **ビルド:** `npm run build` および `npm run deploy:test` が警告なしで成功する。
+*   **テンプレートレンダリング:**
+    *   Nunjucksテンプレートのレンダリングエラー（構文、不明なタグ、空白/改行処理）を修正し、基本的なノート構造を出力できるようになった (`TemplateRenderer`, `settings.ts`)。
+*   **Kindleアプリリンク (`appLink`) 生成:** 各ハイライトに対応する `kindle://` 形式のディープリンクを生成し、Markdown出力に追加できる (`src/main.ts`)。
+*   **ファイル保存:** 出力ディレクトリパスを正規化（先頭/末尾スラッシュ除去）することで、`getAbstractFileByPath` が `null` を返す問題を解消し、既存ファイルの更新と新規ファイルの作成が正常に行えるようになった (`src/main.ts`)。
+*   **ハイライト情報の抽出:** ノートブックページのHTMLから、ハイライトのテキスト、位置 (`location`)、メモ (`note`)、色 (`color`) を抽出できる (`KindleApiService` 内)。
 
-## 2. What's Left to Build (Focus: Login Feature)
+## 2. 残っているタスク
 
-*   **Amazon Login Modal (`AmazonLoginModal.ts`):**
-    *   Implement `iframe` embedding of the Amazon login page.
-    *   Implement dynamic loading of region-specific login URLs.
-    *   Implement robust detection of successful login via URL redirection monitoring.
-    *   Implement communication of login status (success/failure) back to the main plugin/service.
-*   **Session Management (`KindleApiService` / `AmazonLoginModal`):**
-    *   Determine and implement the mechanism for leveraging the established session (cookies) for subsequent actions.
-    *   Implement secure handling/storage if necessary (though reliance on implicit session is the current plan).
-*   **Amazon Logout Modal & Logic (New):**
-    *   Create the `AmazonLogoutModal`.
-    *   Implement the logic to effectively clear the Amazon session/cookies within the Obsidian environment.
-*   **Integration (`KindleApiService`, `main.ts`):**
-    *   Integrate the login status check into the sync workflow.
-    *   Ensure `KindleApiService` uses the established session for data fetching.
-*   **Data Fetching (`KindleApiService`):**
-    *   Implement the actual logic to fetch books and highlights from Kindle Cloud Reader using the authenticated session (likely involving scraping or interacting with the Cloud Reader's internal APIs if accessible).
-*   **Parsing & Rendering Logic:**
-    *   Flesh out the implementation details in `HighlightParser` and `TemplateRenderer` to process the fetched data and create Obsidian notes.
-*   **Settings Refinement:** Add UI elements for Amazon region selection and potentially other login-related settings.
-*   **Error Handling:** Implement comprehensive error handling for login, logout, and data fetching processes.
-*   **Testing:** Conduct thorough testing across different scenarios and Amazon regions.
+*   **リージョン対応の完全化:**
+    *   `parseToDateString` や書籍URL生成ロジックが、設定されたAmazonリージョンに基づいて正しく動作するように修正する。
+    *   `REGION_URLS` に含まれていない他のリージョン（例: `fr`）の日付形式などに対応する。
+*   **ノート生成の最終調整:**
+    *   抽出した書籍情報とハイライトデータを使って、`TemplateRenderer` が意図通りにMarkdownノートを生成できるか最終確認・調整する（基本的なレンダリング、`appLink`、ハイライト抽出は機能するようになった）。
+    *   テンプレート内で新しい書籍フィールド (`asin`, `url`, `imageUrl`, `lastAnnotatedDate`) や抽出されたハイライトの色情報 (`color`) などを利用できるようにする。
+*   **リファクタリング:**
+    *   `KindleApiService` 内のHTMLパースロジックを `HighlightParser` サービスに分離する。
+*   **ログアウト処理の改善:**
+    *   保持している `BrowserWindow` のセッション（Cookieなど）を確実にクリアするログアウト機能を実装する。
+*   **エラーハンドリングの強化:**
+    *   セッション切れ、ネットワークエラー、予期せぬHTML構造など、より多くのエッジケースに対応する。
+    *   ユーザーへのフィードバックをより分かりやすくする。
+*   **UI/UX:**
+    *   設定画面でリージョン選択などを分かりやすく表示する。
+    *   同期中の進捗表示（任意）。
+    *   リボンアイコンの追加（任意）。
+*   **テスト:**
+    *   様々なアカウント、書籍、ハイライトデータでテストする。
+    *   異なるAmazonリージョンでテストする。
 
-## 3. Current Status
+## 3. 現在のステータス
 
-*   **Planning & Setup:** The project is in the initial implementation phase for the core Cloud Reader authentication feature. Foundational documentation and project structure are set up.
-*   **Blocked:** The primary functionality (syncing highlights) is blocked until the authentication mechanism is successfully implemented.
+*   コアとなるHTML取得、書籍情報と**ハイライト情報の抽出**（色情報含む）、Kindleアプリリンクの生成、ノートのファイル保存/更新は機能するようになった。
+*   `electron.remote` を利用するアーキテクチャに移行したが、そのリスクは認識している。
+*   より詳細な機能（リージョン対応、ノート生成の最終調整など）の実装が必要。（注: ハイライト色のマッピングは意図的に省略）
 
-## 4. Known Issues & Blockers
+## 4. 既知の問題点
 
-*   **Authentication Implementation:** The core task of implementing the `iframe`-based login, session handling, and logout is the main blocker. Technical challenges related to cross-context scripting, cookie management, and the brittleness of relying on Amazon's web UI structure are anticipated.
-*   **Session Persistence/Usage:** Uncertainty remains about the best way to reliably use the `iframe`-established session for background API calls/scraping within Obsidian's limitations.
-*   **Logout Reliability:** Clearing cookies set within an `iframe` from the parent context can be technically challenging and requires investigation.
-*   **Scraping Brittleness:** The data fetching process, likely relying on scraping the Cloud Reader HTML, will be prone to breaking if Amazon updates its website.
+*   `electron.remote` の利用に伴う潜在的なリスク（非推奨、将来の互換性）。
+*   HTMLスクレイピングに依存するため、Amazon側のUI変更に弱い。
+*   動的コンテンツの読み込み待機時間が固定（5秒）であり、環境によっては不安定になる可能性がある。

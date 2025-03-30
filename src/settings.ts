@@ -27,8 +27,46 @@ export interface KindleHighlightsSettings {
 
 export const DEFAULT_SETTINGS: KindleHighlightsSettings = {
 	outputDirectory: "Kindle Highlights",
-	templateContent:
-		"# {{title}}\n\n## Highlights\n\n{{#highlights}}\n> {{text}}\n\n{{/highlights}}",
+	// Updated default template using Nunjucks syntax
+	templateContent: `---
+aliases:
+tags: []
+created:
+updated:
+---
+
+{% if imageUrl %}![image]({{imageUrl}})
+{% endif %}
+
+## 書籍情報
+{% if authorUrl %}
+- 著者: [{{author}}]({{authorUrl}})
+{% elif author %}
+- 著者: [[{{author}}]]
+{% endif %}
+{% if highlightsCount %}
+- ハイライト数: {{highlightsCount}}
+{% endif %}
+{% if lastAnnotatedDate %}
+- 最後にハイライトした日: {{lastAnnotatedDate}}
+{% endif %}
+{% if publicationDate %}
+- 発行日: {{publicationDate}}
+{% endif %}
+{% if publisher %}
+- 出版社: {{publisher}}
+{% endif %}
+{% if url %}
+- [Amazon link]({{url}})
+{% endif %}
+{% if appLink %}
+- [Kindle link]({{appLink}})
+{% endif %}
+
+## ハイライト
+{# This variable contains the pre-rendered list of highlights #}
+{{ highlights }}
+`,
 	amazonRegion: "com",
 	downloadMetadata: true,
 };
@@ -62,16 +100,19 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 		// 2. テンプレート設定
 		new Setting(containerEl)
 			.setName("Note Template")
-			.setDesc("Template for generated notes")
-			.addTextArea((text) =>
-				text
-					.setPlaceholder(DEFAULT_SETTINGS.templateContent)
+			.setDesc(
+				"Template for generated notes (uses Nunjucks syntax). See Nunjucks documentation for details."
+			)
+			.addTextArea((text) => {
+				text.setPlaceholder(DEFAULT_SETTINGS.templateContent)
 					.setValue(this.plugin.settings.templateContent)
 					.onChange(async (value) => {
 						this.plugin.settings.templateContent = value;
 						await this.plugin.saveSettings();
-					})
-			);
+					});
+				// Make the text area taller
+				text.inputEl.setAttr("rows", 15);
+			});
 
 		// 3. Amazonリージョン設定 (Dropdown)
 		new Setting(containerEl)

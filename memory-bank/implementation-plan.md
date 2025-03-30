@@ -1,102 +1,44 @@
-# Implementation Plan: Amazon Cloud Reader Login Feature (2025-03-29)
+# 実行計画：Kindle Cloud Reader ハイライト情報抽出 (electron.remote版)
 
-## Goal
+**最終更新日:** 2025-03-30
 
-Enable users to log into their Amazon account within Obsidian and utilize that session to synchronize Kindle highlights.
+**目標:** `KindleApiService` 内で、`loadRemoteDom` ユーティリティ（内部で `electron.remote` を使用）を利用して Kindle Cloud Reader のノートブックページの HTML を取得し、`cheerio` で解析してハイライト情報を抽出する。
 
-## Key Components
+**前提:**
 
-*   **`AmazonLoginModal`**: Modal embedding the Amazon login page via `iframe` and handling authentication.
-*   **`AmazonLogoutModal`**: Modal or prompt for handling logout.
-*   **`KindleApiService`**: Service managing login state, communication with Amazon (login, data fetching).
-*   **`SettingsTab`**: UI for Amazon region selection.
+*   認証プロセスは完了しており、`AmazonLoginModal` によって生成・保持されているログイン済みの `BrowserWindow` インスタンスが `KindleApiService` 内で利用可能である (`loginWindow` プロパティ)。
+*   HTML解析ライブラリ `cheerio` がプロジェクトに追加されている。
+*   書籍情報の基本的な抽出ロジックは `KindleApiService` 内に既に存在する。
 
-## Steps
+**ステップ:**
 
-1.  **Preparation:**
-    *   Add Amazon region setting (`com`, `co.jp`, etc.) to `settings.ts`.
-    *   Define region-specific login and Cloud Reader URLs (e.g., in `KindleApiService`).
+1.  **`KindleApiService.fetchHighlights` の確認/修正:**
+    *   既存の `fetchHighlights` メソッド内で `loadRemoteDom` を呼び出し、ノートブックページの完全なHTMLを取得する部分を確認する。
+    *   `loadRemoteDom` から返されたHTML文字列を `cheerio.load()` に渡して解析オブジェクト (`$`) を生成する。
 
-2.  **`AmazonLoginModal` Implementation (`src/modals/AmazonLoginModal.ts`):**
-    *   Inherit from Obsidian `Modal`.
-    *   `onOpen()`: Create `iframe`, add to `contentEl`, set `src` to region-specific login URL.
-    *   Add CSS for `iframe` sizing.
-    *   `onClose()`: Clean up resources.
+2.  **ハイライト要素の特定と反復処理:**
+    *   `cheerio` オブジェクト (`$`) を使用して、ノートブックページ内の各ハイライトを表すHTML要素を特定するためのCSSセレクタ (`HIGHLIGHT_CONTAINER_SELECTOR` など) を検証・修正する。
+    *   特定したセレクタを使ってハイライト要素群を取得し、`.each()` などで反復処理を行う。
 
-3.  **Login Success Detection (`AmazonLoginModal`):**
-    *   Monitor `iframe` `load` event.
-    *   In handler, check `iframe.contentWindow.location.href` against region-specific Cloud Reader base URL.
-        *   **Risk:** Cross-origin restrictions might block access. Investigate alternatives if needed (e.g., indirect monitoring, manual confirmation).
-    *   On success: Close modal, notify caller (Promise/callback).
-    *   On failure: Notify caller/show error.
+3.  **ハイライト情報の抽出:**
+    *   反復処理の中で、各ハイライト要素から以下の情報を抽出するためのCSSセレクタとロジックを実装・検証する。
+        *   ハイライトテキスト (`HIGHLIGHT_TEXT_SELECTOR`)
+        *   ハイライトの色 (`HIGHLIGHT_COLOR_SELECTOR` - クラス名などから色を特定)
+        *   位置情報 (`HIGHLIGHT_LOCATION_SELECTOR`)
+        *   ページ番号 (`HIGHLIGHT_PAGE_SELECTOR` - 存在する場合)
+        *   関連付けられたメモ (`HIGHLIGHT_NOTE_SELECTOR` - 存在する場合)
+    *   抽出した色情報（例: クラス名 `kp-notebook-highlight-yellow`）を、定義済みの色名（例: `'yellow'`）にマッピングするロジック（例: `mapCssClassToColor` 関数）を実装または利用する。
 
-4.  **Session Management (`KindleApiService`):**
-    *   Receive login success notification, update internal state flag.
-    *   **Hypothesis/Verification:** Assume/verify that `requestUrl` automatically uses cookies set in the `iframe` for same-domain requests.
-    *   Provide `isLoggedIn()` method.
+4.  **`Highlight` モデルへの格納:**
+    *   抽出した各情報を、`src/models/highlight.ts` で定義されている `Highlight` モデルのインスタンスに格納する。
+    *   すべてのハイライト情報を `Highlight[]` 配列として収集する。
 
-5.  **`AmazonLogoutModal` & Logout Logic (New):**
-    *   Create simple confirmation modal (`AmazonLogoutModal`).
-    *   On logout execution:
-        *   **Strategy 1 (Preferred):** Navigate an `iframe` (visible or hidden) to the Amazon logout URL to attempt cookie clearing.
-        *   **Strategy 2 (Fallback):** If Strategy 1 fails, reset internal plugin state only and inform the user (actual Amazon session might persist).
-    *   Update `KindleApiService` internal state.
+5.  **エラーハンドリング:**
+    *   HTML構造の変更によりセレクタが見つからない場合や、予期せぬデータ形式に対するエラーハンドリングを追加・強化する。
 
-6.  **Plugin Integration (`main.ts`, `KindleApiService`):**
-    *   Add login/logout commands and ribbon icons.
-    *   On sync command: Check `KindleApiService.isLoggedIn()`.
-    *   If not logged in: Show `AmazonLoginModal`.
-    *   If logged in: Proceed with data fetching via `KindleApiService`.
-    *   Implement `login()`, `logout()`, `fetchHighlights()` interfaces in `KindleApiService`. `login()` triggers `AmazonLoginModal`.
+**次のステップ (Codeモード):**
 
-7.  **Data Fetching (`KindleApiService`):**
-    *   Implement logic to fetch highlights from Cloud Reader using the established session (expecting `requestUrl` to use cookies). This likely involves scraping or interacting with Cloud Reader's internal APIs.
-
-8.  **Error Handling & Testing:**
-    *   Implement robust error handling for all stages (login, logout, fetch).
-    *   Use `Notice` for user feedback.
-    *   Test thoroughly across regions, 2FA, failures, etc.
-
-## Flow Diagram
-
-```mermaid
-graph TD
-    A[User starts Sync/Login] --> B{Logged In?};
-    B -- No --> C[Show AmazonLoginModal];
-    B -- Yes --> D[Proceed to Fetch Highlights (KindleApiService)];
-
-    subgraph AmazonLoginModal
-        C --> E[Create iframe];
-        E --> F[Load Amazon Login URL (by region)];
-        F --> G{Monitor iframe Navigation};
-        G -- Login Page Loaded --> G;
-        G -- Redirect to Cloud Reader URL? --> H{Login Success?};
-        H -- Yes --> I[Notify Success & Close];
-        H -- No (Error/Timeout/Other URL) --> J[Notify Failure & Close / Show Error];
-    end
-
-    I --> K[Update Plugin Login State];
-    J --> L[Show Error Notice];
-    K --> D;
-
-    M[User starts Logout] --> N[Show AmazonLogoutModal (Confirm)];
-    N --> O{Attempt Logout};
-
-    subgraph Logout Logic
-        O --> P[Navigate iframe to Logout URL];
-        P --> Q{Clear Internal Login State};
-        %% Consider fallback if P fails
-    end
-    Q --> R[Show Logout Confirmation Notice];
-
-    D --> S[KindleApiService uses Session Cookies];
-    S --> T[Fetch Data from Cloud Reader];
-    T --> U[Parse & Save Highlights];
-```
-
-## Key Risks & Considerations
-
-*   **Cross-Origin Restrictions:** Accessing `iframe.contentWindow.location` might be blocked.
-*   **Cookie Access/Usage:** Relying on `requestUrl` to automatically use `iframe`-set cookies needs verification.
-*   **Logout Reliability:** Clearing cookies effectively via `iframe` navigation is uncertain.
-*   **Scraping Brittleness:** Data fetching logic might break if Amazon changes the Cloud Reader UI.
+*   ステップ2のハイライト要素特定のためのCSSセレクタを検証・修正する。
+*   ステップ3の各ハイライト情報の抽出ロジックと色マッピングを実装・検証する。
+*   ステップ4の `Highlight` モデルへのデータ格納を実装する。
+*   ステップ5のエラーハンドリングを実装する。

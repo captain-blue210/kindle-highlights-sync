@@ -6,4 +6,5 @@ export interface Highlight {
 	page?: number;
 	createdAt?: Date;
 	note?: string;
+	color?: string; // Added color field
 }

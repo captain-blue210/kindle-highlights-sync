@@ -139,9 +139,10 @@ export default class KindleHighlightsPlugin extends Plugin {
 				);
 				// Assign the fetched/structured metadata back to the book object
 				book.metadata = metadata;
-				// Optionally update coverUrl if it was fetched
-				if (metadata.coverUrl) {
-					book.coverUrl = metadata.coverUrl;
+				// Optionally update imageUrl if it was fetched
+				if (metadata.imageUrl) {
+					// Check for imageUrl
+					book.imageUrl = metadata.imageUrl; // Assign to imageUrl
 				}
 			} catch (error) {
 				console.warn(
@@ -177,30 +178,133 @@ export default class KindleHighlightsPlugin extends Plugin {
 
 			if (bookHighlights.length === 0) continue;
 
-			// テンプレートに基づいてノート内容を生成
-			const content = renderTemplate(this.settings.templateContent, {
-				book,
-				highlights: bookHighlights,
-			});
+			// Format highlights into a Markdown list string
+			const highlightsString = bookHighlights
+				.map((h) => {
+					// Construct the appLink based on asin and location
+					let appLink = `kindle://book?action=open&asin=${book.asin}`;
+					if (h.location) {
+						appLink += `&location=${h.location}`;
+					}
+
+					// Use the appLink in the Markdown output
+					let item = `> ${h.text}\n> 位置: [${h.location}](${appLink})`; // <-- Link inserted here
+					if (h.note) {
+						// Indent note under the highlight
+						item += `\n  - Note: ${h.note}`;
+					}
+					return `${item}\n`;
+				})
+				.join("\n");
+
+			// Format lastAnnotatedDate (if available) to YYYY-MM-DD
+			const formattedLastAnnotatedDate = book.lastAnnotatedDate
+				? book.lastAnnotatedDate.toISOString().split("T")[0]
+				: undefined;
+
+			// Prepare context for Nunjucks, ensuring all expected keys are present
+			const context = {
+				// Include the book object itself, as required by TemplateContext
+				book: book,
+				// Spread book properties for direct access (title, author, url, imageUrl, etc.)
+				...book,
+				// Add derived/formatted values
+				highlights: highlightsString,
+				highlightsCount: bookHighlights.length,
+				lastAnnotatedDate: formattedLastAnnotatedDate,
+				// Ensure other potential template variables are at least undefined if not in book
+				authorUrl: book.metadata?.authorUrl, // Example: assuming it might be in metadata
+				publicationDate: book.metadata?.publicationDate,
+				publisher: book.metadata?.publisher,
+				appLink: book.metadata?.appLink,
+			};
+
+			let content: string;
+			try {
+				// テンプレートに基づいてノート内容を生成
+				content = renderTemplate(
+					this.settings.templateContent,
+					context
+				);
+			} catch (error) {
+				console.error(
+					`Error rendering template for book "${book.title}":`,
+					error
+				);
+				new Notice(
+					`Template Error for "${book.title}": ${
+						error.message || "Unknown error"
+					}. Skipping this book.`
+				);
+				continue; // Skip to the next book if template rendering fails
+			}
 
 			// ファイル名の作成（特殊文字を置換）
 			const fileName = `${book.title.replace(/[\\/:*?"<>|]/g, "_")}.md`;
-			const filePath = this.settings.outputDirectory
-				? `${this.settings.outputDirectory}/${fileName}`
+
+			// Normalize output directory path (remove leading/trailing slashes)
+			let normalizedDir = this.settings.outputDirectory;
+			if (normalizedDir) {
+				normalizedDir = normalizedDir.replace(/^\/+|\/+$/g, ""); // Remove leading/trailing slashes
+			}
+
+			// Construct the final path relative to the vault root
+			const filePath = normalizedDir
+				? `${normalizedDir}/${fileName}`
 				: fileName;
+
+			console.log(
+				`[Kindle Sync] Preparing to save/update file. Calculated filePath: "${filePath}"`
+			); // Log filePath
 
 			// ファイルの存在確認
 			const fileExists = await this.app.vault.adapter.exists(filePath);
+			console.log(
+				`[Kindle Sync] File exists check for "${filePath}": ${fileExists}`
+			); // Log exists result
 
 			if (fileExists) {
 				// 既存ファイルの更新
+				console.log(
+					`[Kindle Sync] Attempting to get existing file object for: "${filePath}"`
+				); // Log before get
 				const file = this.app.vault.getAbstractFileByPath(
 					filePath
 				) as TFile;
+				console.log(
+					`[Kindle Sync] Result of getAbstractFileByPath for "${filePath}":`,
+					file
+				); // Log the file object (or null)
+
+				if (!file) {
+					// Add a check here!
+					console.error(
+						`[Kindle Sync] Error: File object is null for path "${filePath}" despite exists check returning true. Skipping modification.`
+					);
+					new Notice(
+						`Error processing file: ${filePath}. File object not found.`
+					);
+					continue; // Skip this book to prevent the error
+				}
+
+				console.log(
+					`[Kindle Sync] Attempting to modify file: "${filePath}"`
+				); // Log before modify
+				// console.log(`[Kindle Sync] Content for modify:`, content); // Optional: Log content if needed
 				await this.app.vault.modify(file, content);
+				console.log(
+					`[Kindle Sync] Successfully modified file: "${filePath}"`
+				); // Log after modify
 			} else {
 				// 新規ファイルの作成
+				console.log(
+					`[Kindle Sync] Attempting to create new file: "${filePath}"`
+				); // Log before create
+				// console.log(`[Kindle Sync] Content for create:`, content); // Optional: Log content if needed
 				await this.app.vault.create(filePath, content);
+				console.log(
+					`[Kindle Sync] Successfully created file: "${filePath}"`
+				); // Log after create
 			}
 		}
 	}

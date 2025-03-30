@@ -2,15 +2,30 @@
 import { Notice } from "obsidian";
 import { getRegionUrls } from "../services/kindle-api"; // Import helper
 
-// Attempt to import Electron remote module - this might vary depending on Obsidian/Electron version
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const electron = require("electron");
-const remote = electron?.remote || electron?.contextBridge?.electron?.remote; // Handle potential variations
-const BrowserWindow = remote?.BrowserWindow; // Use original name
+// Attempt to import Electron remote module using window.require
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const window: any; // Declare window to access require if available
+let remote: any | undefined; // Use any for remote type
+let BrowserWindow: typeof Electron.BrowserWindow | undefined;
+try {
+	const electron = window.require?.("electron");
+	remote = electron?.remote;
+	BrowserWindow = remote?.BrowserWindow;
+} catch (e) {
+	console.error("AmazonLoginModal: Failed to require electron remote:", e);
+	// Keep remote and BrowserWindow as undefined
+}
 
 export class AmazonLoginModal {
-	private loginPromise: Promise<boolean>; // Resolves true on success, false on cancel/failure
-	private resolvePromise!: (success: boolean) => void; // Definite assignment assertion
+	private loginPromise: Promise<{
+		success: boolean;
+		window?: Electron.BrowserWindow;
+	}>; // Return window on success
+	// Update resolvePromise type to match the promise
+	private resolvePromise!: (result: {
+		success: boolean;
+		window?: Electron.BrowserWindow;
+	}) => void;
 	private modal: Electron.BrowserWindow | null = null; // Use Electron namespace type
 	private readonly loginUrl: string | null;
 	private readonly cloudReaderUrl: string | null;
@@ -43,17 +58,22 @@ export class AmazonLoginModal {
 		if (!BrowserWindow) {
 			// Use the correct variable name
 			console.error(
-				"AmazonLoginModal: Electron BrowserWindow is not available. Cannot create login window.",
-				this.resolvePromise(false)
+				"AmazonLoginModal: Electron BrowserWindow is not available. Cannot create login window."
 			);
+			// Pass the correct object structure
+			this.resolvePromise({ success: false });
 		}
 	}
 
 	/**
 	 * Opens a new browser window for Amazon login and returns a promise
-	 * that resolves with true upon successful login, or false if cancelled/failed.
+	 * that resolves with an object containing success status and the window instance
+	 * upon successful login, or just success status if cancelled/failed.
 	 */
-	public async doLogin(): Promise<boolean> {
+	public async doLogin(): Promise<{
+		success: boolean;
+		window?: Electron.BrowserWindow;
+	}> {
 		// Ensure URLs are valid and BrowserWindow is available
 		if (
 			!this.loginUrl ||
@@ -64,7 +84,7 @@ export class AmazonLoginModal {
 			new Notice(
 				"Error: Cannot initiate login. Invalid Amazon region configuration or Electron components unavailable."
 			);
-			this.resolvePromise(false); // Resolve immediately if prerequisites fail
+			this.resolvePromise({ success: false }); // Resolve immediately if prerequisites fail
 			return this.loginPromise; // Return the already resolved promise
 		}
 
@@ -113,8 +133,13 @@ export class AmazonLoginModal {
 						"AmazonLoginModal: Success detected (Cloud Reader URL)."
 					);
 					new Notice("Amazon login successful!");
-					this.resolvePromise(true);
-					this.closeWindow(); // Close the window safely
+					// Resolve with success and the window instance (if not null)
+					this.resolvePromise({
+						success: true,
+						window: this.modal ?? undefined,
+					});
+					// Don't close the window, just hide it
+					this.hideWindow(); // We'll rename closeWindow next
 				}
 				// Optional: Could also check for notebookUrl if loginUrl redirects there first
 				// else if (this.notebookUrl && url.startsWith(this.notebookUrl)) {
@@ -130,9 +155,11 @@ export class AmazonLoginModal {
 				console.log("AmazonLoginModal: Login window closed.");
 				// Only resolve as false if the promise hasn't already been resolved (e.g., by successful navigation)
 				// This prevents overwriting a successful login if 'closed' fires slightly after 'did-navigate' success
-				this.loginPromise.then((alreadyResolved) => {
-					if (!alreadyResolved) {
-						this.resolvePromise(false);
+				// Check the success property of the resolved object
+				this.loginPromise.then((result) => {
+					if (!result.success) {
+						// Check if already resolved with success=false or not resolved yet
+						this.resolvePromise({ success: false });
 					}
 				});
 				this.modal = null; // Clean up reference
@@ -157,16 +184,18 @@ export class AmazonLoginModal {
 		return this.loginPromise;
 	}
 
-	// Helper to safely close the window
-	private closeWindow() {
+	// Helper to safely hide the window instead of closing it
+	private hideWindow() {
 		if (this.modal && !this.modal.isDestroyed()) {
 			try {
-				this.modal.close();
+				// Hide instead of close
+				this.modal.hide();
+				console.log("AmazonLoginModal: Login window hidden.");
 			} catch (e) {
-				console.error("AmazonLoginModal: Error closing window:", e);
+				console.error("AmazonLoginModal: Error hiding window:", e);
 			}
 		}
-		this.modal = null;
+		// Don't set this.modal to null here, as we need the reference later
 	}
 
 	// No longer need onOpen or onClose as we're not using Obsidian's Modal
