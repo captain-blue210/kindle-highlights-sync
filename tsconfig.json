@@ -4,7 +4,7 @@
 		"inlineSourceMap": true,
 		"inlineSources": true,
 		"module": "ESNext",
-		"target": "ES6",
+		"target": "ES2018", // Updated target to support regex 's' flag
 		"allowJs": true,
 		"noImplicitAny": true,
 		"moduleResolution": "node",

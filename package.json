@@ -7,7 +7,8 @@
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
-		"deploy:test": "npm run build && mkdir -p plugin-test/.obsidian/plugins/kindle-highlights-sync && cp main.js manifest.json styles.css plugin-test/.obsidian/plugins/kindle-highlights-sync/"
+		"deploy:test": "npm run build && mkdir -p plugin-test/.obsidian/plugins/kindle-highlights-sync && cp main.js manifest.json styles.css plugin-test/.obsidian/plugins/kindle-highlights-sync/",
+		"test": "vitest run"
 	},
 	"keywords": [],
 	"author": "",
@@ -18,7 +19,8 @@
 		"@rollup/plugin-typescript": "^12.1.2",
 		"@types/cheerio": "^0.22.35",
 		"@types/electron": "^1.6.12",
-		"@types/node": "^16.11.6",
+		"@types/node": "^18.19.84",
+		"@types/nunjucks": "3.2.6",
 		"@typescript-eslint/eslint-plugin": "5.29.0",
 		"@typescript-eslint/parser": "5.29.0",
 		"builtin-modules": "3.3.0",
@@ -26,10 +28,12 @@
 		"obsidian": "latest",
 		"rollup": "^4.38.0",
 		"tslib": "2.4.0",
-		"typescript": "^4.7.4"
+		"typescript": "^5.8.2",
+		"vitest": "3.0.9"
 	},
 	"dependencies": {
 		"cheerio": "^1.0.0",
-		"moment": "^2.30.1"
+		"moment": "^2.30.1",
+		"nunjucks": "3.2.4"
 	}
 }

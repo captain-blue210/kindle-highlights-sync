@@ -178,11 +178,59 @@ export default class KindleHighlightsPlugin extends Plugin {
 
 			if (bookHighlights.length === 0) continue;
 
-			// テンプレートに基づいてノート内容を生成
-			const content = renderTemplate(this.settings.templateContent, {
-				book,
-				highlights: bookHighlights,
-			});
+			// Format highlights into a Markdown list string
+			const highlightsString = bookHighlights
+				.map((h) => {
+					let item = `- ${h.text}`;
+					if (h.note) {
+						// Indent note under the highlight
+						item += `\n  - Note: ${h.note}`;
+					}
+					return item;
+				})
+				.join("\n");
+
+			// Format lastAnnotatedDate (if available) to YYYY-MM-DD
+			const formattedLastAnnotatedDate = book.lastAnnotatedDate
+				? book.lastAnnotatedDate.toISOString().split("T")[0]
+				: undefined;
+
+			// Prepare context for Nunjucks, ensuring all expected keys are present
+			const context = {
+				// Include the book object itself, as required by TemplateContext
+				book: book,
+				// Spread book properties for direct access (title, author, url, imageUrl, etc.)
+				...book,
+				// Add derived/formatted values
+				highlights: highlightsString,
+				highlightsCount: bookHighlights.length,
+				lastAnnotatedDate: formattedLastAnnotatedDate,
+				// Ensure other potential template variables are at least undefined if not in book
+				authorUrl: book.metadata?.authorUrl, // Example: assuming it might be in metadata
+				publicationDate: book.metadata?.publicationDate,
+				publisher: book.metadata?.publisher,
+				appLink: book.metadata?.appLink,
+			};
+
+			let content: string;
+			try {
+				// テンプレートに基づいてノート内容を生成
+				content = renderTemplate(
+					this.settings.templateContent,
+					context
+				);
+			} catch (error) {
+				console.error(
+					`Error rendering template for book "${book.title}":`,
+					error
+				);
+				new Notice(
+					`Template Error for "${book.title}": ${
+						error.message || "Unknown error"
+					}. Skipping this book.`
+				);
+				continue; // Skip to the next book if template rendering fails
+			}
 
 			// ファイル名の作成（特殊文字を置換）
 			const fileName = `${book.title.replace(/[\\/:*?"<>|]/g, "_")}.md`;
