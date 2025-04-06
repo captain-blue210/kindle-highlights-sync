@@ -7,4 +7,5 @@ export interface Highlight {
 	createdAt?: Date;
 	note?: string;
 	color?: string; // Added color field
+	appLink?: string; // Add kindle:// link
 }

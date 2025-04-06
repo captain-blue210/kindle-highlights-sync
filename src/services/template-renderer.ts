@@ -21,7 +21,7 @@ interface TemplateContext {
 	highlights: string; // Changed from Highlight[] as the template expects a string
 	// Add other top-level variables expected by the template
 	title: string;
-	author: string;
+	author?: string; // Make author optional to align with Book model
 	authorUrl?: string;
 	imageUrl?: string;
 	highlightsCount?: number;

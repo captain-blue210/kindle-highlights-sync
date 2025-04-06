@@ -2,8 +2,9 @@ import moment from "moment"; // Revert to default import
 import { App, Notice } from "obsidian"; // Keep App, Notice
 import { AmazonLoginModal } from "../modals/AmazonLoginModal"; // Import the modal
 import { Book, Highlight } from "../models";
-import { loadRemoteDom } from "../utils/remote-loader"; // Add loadRemoteDom
-// import { br2ln, hash } from "../utils"; // Assume these exist - TODO: Add these functions
+import { loadRemoteDom } from "../utils/remote-loader";
+import { HighlightParser } from "./highlight-parser"; // Import the new parser
+// import { br2ln, hash } from "../utils";
 
 // --- Region URL Definitions --- (Keep outside class for now)
 
@@ -106,13 +107,14 @@ export function getRegionUrls(region: string): AmazonRegionUrls | undefined {
 }
 
 // Helper function to parse author string (from example)
-export const parseAuthor = (scrapedAuthor: string): string => {
+export const parseAuthor = (
+	scrapedAuthor: string | undefined
+): string | undefined => {
 	// Example format: "著者: Author Name" or "By: Author Name"
 	// Removes prefix like "著者: " or "By: "
-	return (
-		scrapedAuthor?.replace(/^(著者:|By:)\s*/i, "")?.trim() ||
-		"Unknown Author"
-	);
+	const author = scrapedAuthor?.replace(/^(著者:|By:)\s*/i, "")?.trim();
+	// Return the trimmed author name only if it's not empty, otherwise return undefined
+	return author ? author : undefined;
 };
 
 // Helper function to parse date string (adapted from example with region handling)
@@ -149,35 +151,10 @@ export const parseToDateString = (
 const USER_AGENT =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"; // Re-add
 
-// --- CSS Selectors --- (Keep outside class)
-const BOOK_SELECTOR = ".kp-notebook-library-each-book"; // Main container for each book
-// const BOOK_ASIN_ATTR = "data-asin"; // Removed - ASIN extraction is more complex now
-const BOOK_TITLE_SELECTOR = "h2.kp-notebook-searchable"; // Updated based on example
-const BOOK_AUTHOR_SELECTOR = "p.kp-notebook-searchable"; // Updated based on example
-const BOOK_IMAGE_SELECTOR = ".kp-notebook-cover-image"; // Added for clarity
-const BOOK_LAST_ANNOTATED_SELECTOR = '[id^="kp-notebook-annotated-date"]'; // Added for clarity
-// const BOOK_COVER_SELECTOR = "img.kp-notebook-cover-image";
-
-// --- Highlight Selectors (from reference code) ---
-const HIGHLIGHT_CONTAINER_SELECTOR = ".a-row.a-spacing-base"; // Reference uses this as the base row
-const HIGHLIGHT_TEXT_SELECTOR = "#highlight"; // Reference uses ID
-const HIGHLIGHT_NOTE_SELECTOR = "#note"; // Reference uses ID
-const HIGHLIGHT_LOCATION_SELECTOR = "#kp-annotation-location"; // Reference uses this ID for location value - RESTORED
-// Removed unused HIGHLIGHT_PAGE_HEADER_SELECTOR
-const HIGHLIGHT_COLOR_SELECTOR = ".kp-notebook-highlight"; // Reference uses this class on a child element for color
-const PAGINATION_TOKEN_SELECTOR = ".kp-notebook-annotations-next-page-start"; // Reference selector
-const PAGINATION_LIMIT_STATE_SELECTOR = ".kp-notebook-content-limit-state"; // Reference selector
-// const HIGHLIGHT_ASIN_ATTR = "data-asin"; // ASIN seems to be part of the URL now, not attribute
-
-// --- Color Mapping (from reference code) ---
-const mapTextToColor = (
-	highlightClasses: string | undefined
-): Highlight["color"] => {
-	if (!highlightClasses) return undefined;
-	const matches = /kp-notebook-highlight-(.*)/.exec(highlightClasses);
-	// Ensure the return type matches Highlight['color'] which is string | undefined
-	return matches ? (matches[1] as Highlight["color"]) : undefined;
-};
+// --- CSS Selectors for Pagination ---
+const PAGINATION_TOKEN_SELECTOR = ".kp-notebook-annotations-next-page-start";
+const PAGINATION_LIMIT_STATE_SELECTOR = ".kp-notebook-content-limit-state";
+// Book and Highlight selectors are now in HighlightParser
 
 // --- Pagination State ---
 type NextPageState = {
@@ -192,8 +169,11 @@ export class KindleApiService {
 	private app: App; // Store App instance
 	private loginWindow: BrowserWindow | null = null; // Store reference to the login window
 
+	private parser: HighlightParser;
+
 	constructor(app: App) {
 		this.app = app;
+		this.parser = new HighlightParser();
 	}
 
 	public isLoggedIn(): boolean {
@@ -249,7 +229,7 @@ export class KindleApiService {
 		this.loginWindow = null;
 	}
 
-	// --- Private Helper Methods for Highlight Scraping (Adapted from reference) ---
+	// --- Private Helper Methods for Highlight Scraping ---
 
 	private _buildHighlightsUrl(
 		regionUrls: AmazonRegionUrls,
@@ -262,128 +242,23 @@ export class KindleApiService {
 		}&token=${state?.token ?? ""}`;
 	}
 
-	private _parseNextPageState($: cheerio.Root): NextPageState | null {
+	// Updated _parseNextPageState to use CheerioAPI type
+	private _parseNextPageState($: cheerio.CheerioAPI): NextPageState | null {
 		const contentLimitState = $(
 			PAGINATION_LIMIT_STATE_SELECTOR
-		).val() as string; // Added type assertion
-		const token = $(PAGINATION_TOKEN_SELECTOR).val() as string; // Added type assertion
-		// Ensure both values are present, not just token
+		).val() as string;
+		const token = $(PAGINATION_TOKEN_SELECTOR).val() as string;
 		return token && contentLimitState ? { contentLimitState, token } : null;
 	}
 
-	private _parseHighlightsOnPage(
-		$: cheerio.Root,
-		bookAsin: string // Pass book ASIN for association
-	): Highlight[] {
-		const highlightsEl = $(HIGHLIGHT_CONTAINER_SELECTOR).toArray();
+	// _parseHighlightsOnPage and _loadAndScrapeHighlightsPage removed.
 
-		return highlightsEl
-			.map((highlightEl): Highlight | null => {
-				// Use $ within the context of the current element
-				const element = $(highlightEl);
-
-				// Find elements relative to the container
-				const textElement = element.find(HIGHLIGHT_TEXT_SELECTOR);
-				const noteElement = element.find(HIGHLIGHT_NOTE_SELECTOR);
-				// Removed unused locationElement and pageHeaderElement declarations
-				const colorElement = element.find(HIGHLIGHT_COLOR_SELECTOR); // Find the element with color class
-
-				const text = textElement.text()?.trim();
-				if (!text) {
-					// Skip if no highlight text found
-					console.warn(
-						"Skipping highlight element due to missing Text:",
-						element.html()
-					);
-					return null;
-				}
-
-				// Reverted location extraction: Use the correct ID selector and .val() based on user feedback
-				const locationElement = element.find(
-					HIGHLIGHT_LOCATION_SELECTOR
-				);
-				const location =
-					(locationElement.val() as string) || "Unknown Location";
-
-				// Updated page number extraction: Use a guessed class selector
-				const pageText = element
-					.find(".kp-annotation-page-text") // Guessed selector
-					.text()
-					?.trim();
-				const pageMatch = pageText?.match(/page (\d+)/i); // Keep regex for now
-				const page = pageMatch ? parseInt(pageMatch[1], 10) : undefined;
-
-				const highlightClasses = colorElement.attr("class"); // Get classes from the specific color element
-				const color = mapTextToColor(highlightClasses); // Use correct function name
-
-				// TODO: Implement or import br2ln function
-				const noteHtml = noteElement.html();
-				const note = noteHtml ? noteHtml.trim() : undefined; // Use html() for potential <br>, trim later if needed
-				// const note = noteHtml ? br2ln(noteHtml).trim() : undefined; // Use br2ln when available
-
-				// TODO: Implement or import hash function
-				// Generate ID based on ASIN, location, and text snippet. Hash is preferred when available.
-				const id = `highlight-${bookAsin}-${location}-${text.substring(
-					0,
-					10
-				)}`;
-				// const id = hash(text); // Use hash when available
-
-				return {
-					id,
-					bookId: bookAsin, // Use passed ASIN (HIGHLIGHT_ASIN_ATTR was removed)
-					text,
-					color,
-					location,
-					page,
-					note,
-				};
-			})
-			.filter((h): h is Highlight => h !== null); // Filter out null values
-	}
-
-	private async _loadAndScrapeHighlightsPage(
-		book: Book,
-		url: string,
-		regionUrls: AmazonRegionUrls // Pass regionUrls
-	): Promise<{
-		highlights: Highlight[];
-		nextPageUrl: string | null; // Can be null if no next page
-		hasNextPage: boolean;
-	}> {
-		// Check for valid login window before loading
-		if (!this.loginWindow || this.loginWindow.isDestroyed()) {
-			throw new Error(
-				"Kindle session window is not available for loading highlights page. Please log in again."
-			);
-		}
-
-		const { dom: $ } = await loadRemoteDom(
-			url,
-			USER_AGENT,
-			5000, // Keep timeout
-			this.loginWindow // Reuse existing window
-		);
-
-		const highlights = this._parseHighlightsOnPage($, book.asin); // Pass ASIN
-		const nextPageState = this._parseNextPageState($);
-		const hasNextPage = nextPageState !== null;
-		const nextPageUrl = hasNextPage
-			? this._buildHighlightsUrl(regionUrls, book, nextPageState) // Pass regionUrls
-			: null;
-
-		return {
-			highlights,
-			nextPageUrl,
-			hasNextPage,
-		};
-	}
-
+	// Updated _scrapePaginatedHighlightsForBook to use HighlightParser and handle pagination internally
 	private async _scrapePaginatedHighlightsForBook(
 		book: Book,
-		regionUrls: AmazonRegionUrls // Pass regionUrls
+		regionUrls: AmazonRegionUrls
 	): Promise<Highlight[]> {
-		let allHighlights: Highlight[] = [];
+		const allHighlights: Highlight[] = []; // Use const
 		let hasNextPage = true;
 		// Start with the base notebook URL for the book
 		let nextPageUrl: string | null = this._buildHighlightsUrl(
@@ -398,24 +273,42 @@ export class KindleApiService {
 		while (hasNextPage && nextPageUrl) {
 			try {
 				console.log(` - Loading highlights page: ${nextPageUrl}`);
-				// Explicitly type 'data' based on the return type of the awaited function
-				const data: {
-					highlights: Highlight[];
-					nextPageUrl: string | null;
-					hasNextPage: boolean;
-				} = await this._loadAndScrapeHighlightsPage(
-					book,
+
+				// Check for valid login window before loading
+				if (!this.loginWindow || this.loginWindow.isDestroyed()) {
+					throw new Error(
+						"Kindle session window is not available for loading highlights page. Please log in again."
+					);
+				}
+
+				// Load the current page's DOM
+				const { dom: $ } = await loadRemoteDom(
 					nextPageUrl,
-					regionUrls // Pass regionUrls
+					USER_AGENT,
+					5000, // Keep timeout
+					this.loginWindow // Reuse existing window
 				);
 
+				// Parse highlights from the current page using the parser
+				const highlightsOnPage = this.parser.parseHighlightsPage(
+					$,
+					book.asin
+				);
 				console.log(
-					`   - Parsed ${data.highlights.length} highlights from page.`
+					`   - Parsed ${highlightsOnPage.length} highlights from page.`
 				);
-				allHighlights = [...allHighlights, ...data.highlights];
+				allHighlights.push(...highlightsOnPage); // Use push with spread operator
 
-				hasNextPage = data.hasNextPage;
-				nextPageUrl = data.nextPageUrl;
+				// Parse pagination state for the *next* page
+				const nextPageState = this._parseNextPageState($);
+				hasNextPage = nextPageState !== null;
+				nextPageUrl = hasNextPage
+					? this._buildHighlightsUrl(
+							regionUrls,
+							book,
+							nextPageState ?? undefined
+					  ) // Pass undefined if null - Corrected indentation
+					: null;
 
 				// Small delay to avoid overwhelming the server? Optional.
 				// await new Promise(resolve => setTimeout(resolve, 200));
@@ -499,7 +392,7 @@ export class KindleApiService {
 			throw new Error(errorMsg);
 		}
 
-		console.log("KindleApiService: Fetching highlights...");
+		console.log("KindleApiService: Fetching books and highlights...");
 		const regionUrls = getRegionUrls(region);
 		if (!regionUrls) {
 			const errorMsg = `Invalid or unsupported Amazon region: ${region}`;
@@ -513,89 +406,37 @@ export class KindleApiService {
 		);
 
 		try {
-			// Check if we have a valid login window stored
+			// 1. Load the main notebook page DOM
+			console.log(
+				`KindleApiService: Loading notebook page: ${regionUrls.notebookUrl}`
+			);
 			if (!this.loginWindow || this.loginWindow.isDestroyed()) {
 				throw new Error(
 					"Kindle session window is not available. Please log in again."
 				);
 			}
-
-			// Use loadRemoteDom, passing the existing window and user agent
-			const {
-				dom: $,
-				finalUrl,
-				// html, // Remove unused html variable
-			} = await loadRemoteDom(
-				notebookUrl,
-				USER_AGENT, // Pass user agent
-				5000, // Keep increased timeout
-				this.loginWindow
+			const { dom: notebookDom, finalUrl } = await loadRemoteDom(
+				regionUrls.notebookUrl,
+				USER_AGENT,
+				5000, // Keep timeout
+				this.loginWindow // Reuse existing window
 			);
 			console.log(
-				`KindleApiService: Successfully loaded/reused DOM from ${finalUrl}`
+				`KindleApiService: Successfully loaded notebook DOM from ${finalUrl}`
 			);
-			// Optional: Log HTML only if needed for deep debugging
-			// console.log("--- Kindle Notebook HTML Start ---");
-			// console.log(html);
-			// console.log("--- Kindle Notebook HTML End ---");
 
-			// --- Parsing Logic ---
-			let books: Book[] = []; // Changed const to let
-			let allHighlights: Highlight[] = []; // Use 'let' and rename
-
-			// Parse Books (Keep existing book parsing logic)
-			$(BOOK_SELECTOR).each(
-				(_index: number, element: cheerio.Element) => {
-					const bookElement = $(element);
-					// Get ASIN from the element's ID attribute
-					const asin = bookElement.attr("id"); // Use 'asin' variable name
-					// Use updated selectors
-					const title = bookElement
-						.find(BOOK_TITLE_SELECTOR)
-						.text()
-						?.trim();
-					// Use updated selector and parseAuthor helper
-					const scrapedAuthor = bookElement
-						.find(BOOK_AUTHOR_SELECTOR)
-						.text();
-					const author = parseAuthor(scrapedAuthor);
-					// Extract imageUrl
-					const imageUrl = bookElement
-						.find(BOOK_IMAGE_SELECTOR) // Use constant
-						.attr("src");
-					// Extract and parse lastAnnotatedDate
-					const scrapedLastAnnotatedDate = bookElement
-						.find(BOOK_LAST_ANNOTATED_SELECTOR) // Use constant
-						.val() as string | undefined;
-					const lastAnnotatedDate = parseToDateString(
-						scrapedLastAnnotatedDate,
-						region // Pass region argument
-					);
-					// Construct URL (assuming .com for now, needs region later)
-					// TODO: Use region-specific domain from settings or regionUrls
-					const url = `https://www.amazon.com/dp/${asin}`;
-
-					if (asin && title) {
-						// Add all extracted fields to the book object
-						books.push({
-							id: asin,
-							title,
-							author,
-							asin,
-							url,
-							imageUrl,
-							lastAnnotatedDate,
-						});
-					} else {
-						console.warn(
-							"Skipping book element due to missing ASIN or Title:", // Update warning message
-							`ASIN: ${asin}, Title: ${title}`, // Log extracted values
-							bookElement.html() // Log full element HTML for context
-						);
-					}
-				}
+			// 2. Parse Books using HighlightParser
+			console.log(
+				"KindleApiService: Parsing books using HighlightParser..."
 			);
+			let books = this.parser.parseNotebookPage(notebookDom, region); // Use let as it might be sliced
 			console.log(`KindleApiService: Parsed ${books.length} books.`);
+			if (books.length === 0) {
+				console.warn(
+					"KindleApiService: No books parsed from the notebook page."
+				);
+				return { books: [], highlights: [] }; // Return early
+			}
 
 			// --- TEMPORARY: Limit books for testing ---
 			if (books.length > 10) {
@@ -606,54 +447,40 @@ export class KindleApiService {
 			}
 			// --- End Temporary ---
 
-			// --- Fetch Highlights for Each Book (New Logic) ---
-			if (books.length > 0) {
-				console.log(
-					"KindleApiService: Starting highlight fetching for parsed books..."
-				);
-				for (const book of books) {
-					try {
-						const bookHighlights =
-							await this._scrapePaginatedHighlightsForBook(
-								book,
-								regionUrls
-							); // Pass regionUrls
-						allHighlights = [...allHighlights, ...bookHighlights];
-					} catch (bookHighlightError) {
-						console.error(
-							`KindleApiService: Failed to fetch highlights for book ${book.title} (ASIN: ${book.asin}). Skipping book. Error:`,
-							bookHighlightError
+			// 3. Scrape Highlights for each parsed book (Paginated)
+			console.log(
+				"KindleApiService: Starting paginated highlight scraping..."
+			);
+			const allHighlights: Highlight[] = []; // Define allHighlights here - Use const
+
+			for (const book of books) {
+				try {
+					const bookHighlights =
+						await this._scrapePaginatedHighlightsForBook(
+							book,
+							regionUrls
 						);
-						// Optionally notify the user about skipping a book
-						new Notice(
-							`Could not fetch highlights for book: ${book.title}. See console for details.`
-						);
-					}
+					allHighlights.push(...bookHighlights);
+				} catch (error) {
+					console.error(
+						`KindleApiService: Failed to scrape highlights for book ${book.title} (ASIN: ${book.asin}):`,
+						error
+					);
+					new Notice(
+						`Failed to fetch highlights for "${book.title}". Check console for details.`
+					);
+					// Continue to next book even if one fails
 				}
-				console.log(
-					`KindleApiService: Finished fetching highlights for all books. Total highlights: ${allHighlights.length}`
-				);
-			} else {
-				console.log(
-					"KindleApiService: No books found on the initial page, skipping highlight fetching."
-				);
 			}
 
-			// Check if nothing was parsed despite successful load
-			if (books.length === 0 && allHighlights.length === 0) {
-				// Check allHighlights now
-				console.warn(
-					"No books or highlights found after parsing the notebook page. Structure might have changed?"
-				);
-				new Notice(
-					"Could not find any books or highlights on the Kindle Notebook page. The page structure might have changed, or there might be no highlights."
-				);
-			}
+			console.log(
+				`KindleApiService: Fetch complete. Total books: ${books.length}, Total highlights: ${allHighlights.length}`
+			);
 
-			return { books, highlights: allHighlights }; // Return aggregated highlights
+			return { books, highlights: allHighlights };
 		} catch (error) {
 			console.error(
-				"KindleApiService: Error fetching highlights:", // Restore original error context
+				"KindleApiService: Error fetching highlights:",
 				error
 			);
 			// Don't automatically log out on fetch errors, could be temporary
@@ -663,4 +490,4 @@ export class KindleApiService {
 	}
 }
 
-// Remove the old exported scrapeKindleHighlights function if it exists at the end
+// Ensure no old exported functions remain at the end
