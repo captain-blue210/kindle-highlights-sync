@@ -1,9 +1,9 @@
-# アクティブコンテキスト (日本語更新: 2025-03-30)
+# アクティブコンテキスト (日本語更新: 2025-04-06)
 
 ## 1. 現在のフォーカス
 
-*   Kindle Cloud Reader のノートブックページから書籍情報とハイライト情報を取得する機能の実装とデバッグ。
-*   特に、Electron の `BrowserWindow` を利用したHTML取得と、取得したHTMLからのデータ抽出（パース）に焦点を当てている。
+*   Kindle Cloud Reader からのデータ取得と処理に関するリファクタリングと改善。
+*   テスト駆動開発 (TDD) に従った開発プロセスの維持。
 
 ## 2. 最近の主な変更点
 
@@ -22,18 +22,22 @@
 *   **Kindleアプリリンク (`appLink`) の実装:** 計画 (`memory-bank/applink-implementation-plan.md`) に基づき、`src/main.ts` 内で各ハイライトに対応する `kindle://` 形式のディープリンクを生成し、Markdown出力に追加した。
 *   **ファイル保存エラーのデバッグと修正:** `appLink` 実装後に発生した `TypeError: Cannot read properties of null (reading 'saving')` エラーをデバッグ。原因は `outputDirectory` 設定に含まれる先頭スラッシュにより `getAbstractFileByPath` が `null` を返すことと特定。`src/main.ts` の `saveHighlightsAsNotes` 内でパスを正規化（先頭/末尾スラッシュを除去）することで修正した。
 *   **ハイライト情報抽出の実装:** Kindle Cloud Reader のノートブックページから、ハイライトのテキスト、位置 (`location`)、メモ (`note`)、色 (`color`) を抽出するロジック (`KindleApiService` 内) を実装・修正し、機能するようになった。
+*   **HTMLパーサーのリファクタリング:**
+    *   `KindleApiService` 内にあったHTMLパースロジックを、テスト駆動開発 (TDD) に従い、専用の `HighlightParser` サービス (`src/services/highlight-parser.ts`) に分離した。
+    *   `highlight-parser.test.ts` に Vitest を用いたユニットテストを作成した。
+    *   `KindleApiService` をリファクタリングし、`HighlightParser` を利用するように変更した。
 
 ## 3. 現在の決定事項・考慮事項
 
 *   **`electron.remote` の利用:** 実装の簡便性から `electron.remote` を利用しているが、非推奨である点とObsidian環境での将来的な互換性のリスクを認識している。
 *   **動的読み込み待機:** 5秒のタイムアウトでコンテンツ読み込みは成功しているが、これが常に安定するかは不明。より堅牢な待機方法（特定の要素の出現を監視するなど）の検討も将来的には必要かもしれない。
-*   **CSSセレクタの依存性:** 書籍情報・ハイライト情報抽出ロジックはAmazon側のUI変更に弱い。
+*   **CSSセレクタの依存性:** 書籍情報・ハイライト情報抽出ロジックはAmazon側のUI変更に弱い (現在は `HighlightParser` 内に集約)。
 *   **エラーハンドリング:** ログイン失敗、セッション切れ、コンテンツ取得失敗、パース失敗など、各段階でのエラーハンドリングは引き続き重要。
 *   **ハイライト色のマッピングは省略:** ハイライトの色情報 (`color`) は抽出されるが、それを特定の意味（例: CSSクラス、HEX値）にマッピングする機能は現時点では実装しない。
 
 ## 4. 次のステップ
 
 *   **リージョン対応の強化:** 現在ハードコードされている部分（例: `parseToDateString` のデフォルト、書籍URL生成）を、設定から取得したリージョン情報に基づいて動的に変更できるようにする。
-*   **リファクタリング:** `KindleApiService` 内のパースロジックを、当初の計画通り `HighlightParser` サービスに分離することを検討する。
+*   **リファクタリング:** ~~`KindleApiService` 内のパースロジックを、当初の計画通り `HighlightParser` サービスに分離することを検討する。~~ (完了)
 *   **テスト:** 異なるAmazonアカウント、異なる書籍、ハイライトがない場合など、様々なケースで動作確認を行う。
 *   **ログアウト処理の改善:** 現在のiframeベースのログアウトはベストエフォートであり、保持している `BrowserWindow` のセッションを確実にクリアする方法（`webContents.session.clearStorageData()` など）を検討・実装する。

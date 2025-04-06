@@ -1,4 +1,4 @@
-# システムパターン: Obsidian Kindle Highlights Sync (日本語更新: 2025-03-30)
+# システムパターン: Obsidian Kindle Highlights Sync (日本語更新: 2025-04-06)
 
 ## 1. 全体アーキテクチャ
 
@@ -19,7 +19,7 @@ graph TD
         MainPlugin -->|ステータス表示| NoticeAPI[Obsidian Notice API]
 
         SyncProcess --> KindleAPI(KindleApiService / services/kindle-api.ts)
-        SyncProcess --> Parser(HighlightParser / services/highlight-parser.ts) ;; 計画中/暗黙的
+        SyncProcess --> KindleAPI --> Parser(HighlightParser / services/highlight-parser.ts) ;; KindleAPIがParserを利用
         SyncProcess --> Renderer(TemplateRenderer / services/template-renderer.ts)
         SyncProcess --> MetadataService(MetadataService / services/metadata-service.ts)
         SyncProcess --> VaultAPI[Obsidian Vault API]
@@ -30,6 +30,8 @@ graph TD
         KindleAPI -->|データ取得指示(ウィンドウ参照使用)| RemoteLoader(loadRemoteDom / utils/remote-loader.ts)
         RemoteLoader -->|コンテンツ操作/取得| AmazonLoginWindow ;; 既存ウィンドウ再利用
         RemoteLoader -->|取得DOMを返す| KindleAPI
+        KindleAPI -->|DOMを渡す| Parser
+        Parser -->|構造化データを返す| KindleAPI
 
         Renderer --> VaultAPI
     end
@@ -55,8 +57,8 @@ graph TD
 *   **`KindleApiService` (`src/services/kindle-api.ts`):**
     *   Amazon関連の通信全般を担当。
     *   `login` メソッド内で `AmazonLoginModal` を呼び出し、成功時に返された `BrowserWindow` の参照 (`loginWindow`) を保持する。
-    *   `fetchHighlights` メソッド内で、保持している `loginWindow` を `loadRemoteDom` ユーティリティに渡し、Kindle Notebook ページのコンテンツを取得・解析する (**注: 現在、書籍とハイライトの両方の解析ロジックがこのサービス内に実装されています**)。
-    *   書籍やハイライトの情報を抽出するためのCSSセレクタとロジックを含む。
+    *   `fetchHighlights` メソッド内で、保持している `loginWindow` を `loadRemoteDom` ユーティリティに渡し、Kindle Notebook ページのコンテンツを取得する。
+    *   取得したDOMを `HighlightParser` に渡し、書籍とハイライトの情報を解析させる。
     *   ログアウト処理（セッションクリアの試行）も担当する。
 *   **`loadRemoteDom` (`src/utils/remote-loader.ts`):**
     *   指定されたURLを非表示の `BrowserWindow` で読み込むユーティリティ関数。
@@ -64,7 +66,7 @@ graph TD
     *   ページの読み込み完了後、指定されたタイムアウト時間待機し、`body` の `innerHTML` を取得して Cheerio オブジェクトとして返す。
     *   User-Agent の設定やエラーハンドリング、タイムアウト処理を行う。
 *   **Services (`src/services/` 内のその他):**
-    *   **`HighlightParser` (`highlight-parser.ts`):** (現状未使用) Kindle Cloud Readerから取得した生データを、構造化された`Book`および`Highlight`モデルに解析する責務を持つ（現在は `KindleApiService` 内で直接処理）。
+    *   **`HighlightParser` (`highlight-parser.ts`):** Kindle Cloud Readerから取得したHTML (Cheerioオブジェクト) を受け取り、構造化された`Book`および`Highlight`モデルに解析する責務を持つ。`KindleApiService` によって利用される。
     *   **`TemplateRenderer` (`template-renderer.ts`):** 構造化されたデータとユーザー定義のテンプレートを受け取り、Obsidianノート用のMarkdownコンテンツを生成する。
     *   **`MetadataService` (`metadata-service.ts`):** 主に `KindleApiService` で取得した書籍情報（ASINなど）を構造化する。将来的には外部APIから追加情報を取得する可能性もある。
 *   **Models (`src/models/`):** プラグイン全体で使用されるデータ構造（`Book`, `Highlight`）を定義する。
@@ -86,5 +88,5 @@ graph TD
 ## 5. エラーハンドリング
 
 *   `loadRemoteDom` 内でURL読み込み失敗やタイムアウトを処理する。
-*   `KindleApiService` 内でログイン失敗、リージョン無効、コンテンツ解析失敗などを処理し、`Notice` APIでユーザーに通知する。
+*   `KindleApiService` 内でログイン失敗、リージョン無効、コンテンツ取得失敗などを処理し、`Notice` APIでユーザーに通知する。(`HighlightParser` は純粋なパース処理に集中し、エラーハンドリングは呼び出し元で行う想定)。
 *   `AmazonLoginModal` 内でウィンドウ生成失敗などを処理する。
