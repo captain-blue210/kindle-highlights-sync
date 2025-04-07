@@ -1,3 +1,4 @@
+import { EventEmitter } from "events"; // ★ Import EventEmitter
 import moment from "moment"; // Revert to default import
 import { App, Notice } from "obsidian"; // Keep App, Notice
 import { AmazonLoginModal } from "../modals/AmazonLoginModal"; // Import the modal
@@ -253,18 +254,20 @@ export class KindleApiService {
 
 	// _parseHighlightsOnPage and _loadAndScrapeHighlightsPage removed.
 
-	// Updated _scrapePaginatedHighlightsForBook to use HighlightParser and handle pagination internally
+	// Updated _scrapePaginatedHighlightsForBook to use HighlightParser and emit progress
 	private async _scrapePaginatedHighlightsForBook(
 		book: Book,
-		regionUrls: AmazonRegionUrls
+		regionUrls: AmazonRegionUrls,
+		emitter: EventEmitter // ★ Add emitter
 	): Promise<Highlight[]> {
+		emitter.emit("fetch:highlights:start", { bookTitle: book.title }); // ★ Emit highlight fetch start for book
 		const allHighlights: Highlight[] = []; // Use const
 		let hasNextPage = true;
-		// Start with the base notebook URL for the book
 		let nextPageUrl: string | null = this._buildHighlightsUrl(
 			regionUrls,
 			book
-		); // Pass regionUrls
+		);
+		let totalHighlightsForBook = 0; // Keep track of total highlights for this book
 
 		console.log(
 			`KindleApiService: Scraping highlights for book: ${book.title} (ASIN: ${book.asin})`
@@ -273,6 +276,10 @@ export class KindleApiService {
 		while (hasNextPage && nextPageUrl) {
 			try {
 				console.log(` - Loading highlights page: ${nextPageUrl}`);
+				emitter.emit("fetch:page:start", {
+					bookTitle: book.title,
+					url: nextPageUrl,
+				}); // ★ Emit page start
 
 				// Check for valid login window before loading
 				if (!this.loginWindow || this.loginWindow.isDestroyed()) {
@@ -289,7 +296,7 @@ export class KindleApiService {
 					this.loginWindow // Reuse existing window
 				);
 
-				// Parse highlights from the current page using the parser
+				// Parse highlights using the existing page parser
 				const highlightsOnPage = this.parser.parseHighlightsPage(
 					$,
 					book.asin
@@ -297,7 +304,28 @@ export class KindleApiService {
 				console.log(
 					`   - Parsed ${highlightsOnPage.length} highlights from page.`
 				);
-				allHighlights.push(...highlightsOnPage); // Use push with spread operator
+				allHighlights.push(...highlightsOnPage);
+				totalHighlightsForBook += highlightsOnPage.length;
+
+				// Emit progress for each highlight found on the page
+				highlightsOnPage.forEach((highlight, index) => {
+					emitter.emit("fetch:highlights:progress", {
+						bookTitle: book.title,
+						highlightText: highlight.text,
+						highlightsParsedOnPage: index + 1, // Count for this specific page
+						totalHighlightsForBook: totalHighlightsForBook, // Running total for the book
+					});
+					// Optional delay could go here if needed per highlight
+				});
+
+				emitter.emit("fetch:page:end", {
+					// ★ Emit page end
+					bookTitle: book.title,
+					url: nextPageUrl,
+					highlightsFound: highlightsOnPage.length,
+				});
+
+				// This block seems duplicated from the previous change, removing it.
 
 				// Parse pagination state for the *next* page
 				const nextPageState = this._parseNextPageState($);
@@ -317,6 +345,11 @@ export class KindleApiService {
 					`KindleApiService: Error scraping page ${nextPageUrl} for book ${book.asin}:`,
 					pageError
 				);
+				emitter.emit("fetch:page:error", {
+					bookTitle: book.title,
+					url: nextPageUrl,
+					error: pageError.message,
+				}); // ★ Emit page error
 				// Decide if we should stop for this book or try to continue? Stop for now.
 				hasNextPage = false;
 				// Optionally re-throw or handle differently
@@ -329,6 +362,10 @@ export class KindleApiService {
 		console.log(
 			`KindleApiService: Finished scraping for book ${book.asin}. Total highlights: ${allHighlights.length}`
 		);
+		emitter.emit("fetch:highlights:end", {
+			bookTitle: book.title,
+			highlightCount: totalHighlightsForBook,
+		}); // Emit highlight fetch end for book
 		return allHighlights;
 	}
 
@@ -383,7 +420,8 @@ export class KindleApiService {
 	 * @returns An object containing arrays of books and highlights.
 	 */
 	public async fetchHighlights(
-		region: string
+		region: string,
+		emitter: EventEmitter // Add emitter parameter
 	): Promise<{ books: Book[]; highlights: Highlight[] }> {
 		if (!this.loggedIn) {
 			const errorMsg = "Not logged in to Amazon Kindle.";
@@ -393,6 +431,7 @@ export class KindleApiService {
 		}
 
 		console.log("KindleApiService: Fetching books and highlights...");
+		emitter.emit("fetch:start"); // Emit fetch start
 		const regionUrls = getRegionUrls(region);
 		if (!regionUrls) {
 			const errorMsg = `Invalid or unsupported Amazon region: ${region}`;
@@ -429,21 +468,31 @@ export class KindleApiService {
 			console.log(
 				"KindleApiService: Parsing books using HighlightParser..."
 			);
-			let books = this.parser.parseNotebookPage(notebookDom, region); // Use let as it might be sliced
+			emitter.emit("fetch:booklist:start"); // Indicate book list parsing start
+
+			// Use the existing parser method which parses all books at once
+			const books = this.parser.parseNotebookPage(notebookDom, region);
+
+			// Emit progress after parsing all books
+			// We can't easily emit per-book progress without changing the parser significantly
+			emitter.emit("fetch:booklist:end", { totalBooks: books.length }); // Indicate book list parsing end
+
 			console.log(`KindleApiService: Parsed ${books.length} books.`);
 			if (books.length === 0) {
 				console.warn(
 					"KindleApiService: No books parsed from the notebook page."
 				);
+				emitter.emit("fetch:end"); // Emit fetch end early
 				return { books: [], highlights: [] }; // Return early
 			}
 
 			// --- TEMPORARY: Limit books for testing ---
-			if (books.length > 10) {
+			let limitedBooks = books; // Create a new variable for the potentially sliced array
+			if (limitedBooks.length > 10) {
 				console.log(
-					`KindleApiService: Limiting books to 10 for testing (original count: ${books.length}).`
+					`KindleApiService: Limiting books to 10 for testing (original count: ${limitedBooks.length}).`
 				);
-				books = books.slice(0, 10);
+				limitedBooks = limitedBooks.slice(0, 10);
 			}
 			// --- End Temporary ---
 
@@ -453,12 +502,15 @@ export class KindleApiService {
 			);
 			const allHighlights: Highlight[] = []; // Define allHighlights here - Use const
 
-			for (const book of books) {
+			// Use the limited list for scraping
+			for (const book of limitedBooks) {
 				try {
+					// ★ Pass emitter down
 					const bookHighlights =
 						await this._scrapePaginatedHighlightsForBook(
 							book,
-							regionUrls
+							regionUrls,
+							emitter // ★ Pass emitter
 						);
 					allHighlights.push(...bookHighlights);
 				} catch (error) {
@@ -466,6 +518,11 @@ export class KindleApiService {
 						`KindleApiService: Failed to scrape highlights for book ${book.title} (ASIN: ${book.asin}):`,
 						error
 					);
+					// Optionally emit a specific book error event
+					emitter.emit("fetch:book:error", {
+						bookTitle: book.title,
+						error: error.message,
+					});
 					new Notice(
 						`Failed to fetch highlights for "${book.title}". Check console for details.`
 					);
@@ -474,17 +531,20 @@ export class KindleApiService {
 			}
 
 			console.log(
-				`KindleApiService: Fetch complete. Total books: ${books.length}, Total highlights: ${allHighlights.length}`
+				`KindleApiService: Fetch complete. Total books processed: ${limitedBooks.length}, Total highlights: ${allHighlights.length}`
 			);
+			emitter.emit("fetch:end"); // Emit fetch end
 
-			return { books, highlights: allHighlights };
+			// Return the original full book list but only highlights for the processed (limited) books
+			return { books: books, highlights: allHighlights }; // Return original 'books' list
 		} catch (error) {
 			console.error(
 				"KindleApiService: Error fetching highlights:",
 				error
 			);
+			emitter.emit("fetch:error", error.message || "Unknown fetch error"); // Emit fetch error
 			// Don't automatically log out on fetch errors, could be temporary
-			new Notice(`Error fetching Kindle highlights: ${error.message}`);
+			// new Notice(`Error fetching Kindle highlights: ${error.message}`); // Let main handler or modal show notice
 			throw error;
 		}
 	}
