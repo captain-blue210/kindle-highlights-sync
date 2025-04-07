@@ -26,6 +26,17 @@
     *   `KindleApiService` 内にあったHTMLパースロジックを、テスト駆動開発 (TDD) に従い、専用の `HighlightParser` サービス (`src/services/highlight-parser.ts`) に分離した。
     *   `highlight-parser.test.ts` に Vitest を用いたユニットテストを作成した。
     *   `KindleApiService` をリファクタリングし、`HighlightParser` を利用するように変更した。
+    *   **テストとビルドのデバッグ:** リファクタリング後のテスト (`npm run test`) およびビルド (`npm run build`) において、以下の問題を特定し修正した：
+    	*   テスト環境の依存関係モック: Obsidian/Electron 環境依存のモジュール (`obsidian`, `AmazonLoginModal`, `remote-loader`) が原因でテストが失敗したため、`vi.mock` を使用してこれらをモック化。
+    	*   型定義の不整合修正: `Book` モデルの `author` を `string | undefined` に変更したことに伴い、`TemplateContext` の型定義も同様に修正。Cheerio の型 (`CheerioAPI` vs `Root`) の不整合も修正。
+    	*   パーサーロジック修正: テスト用 HTML と実際のパーサーロジック（CSS セレクタ、ASIN 抽出、ノート関連付け）の間にあった不整合を修正。
+    	*   ヘルパー関数の挙動修正: `parseAuthor` が `undefined` を返すように修正し、`parseToDateString` が `null` を返す挙動に合わせてテスト (`toBeNull`) を修正。
+*   **同期プログレスモーダルの実装:**
+    *   同期中にスピナーと詳細なステータス（データ取得中、ノート生成中、現在の書籍/ハイライトなど）を表示する `SyncProgressModal` を実装 (`src/modals/SyncProgressModal.ts`)。
+    *   UI更新のために `EventEmitter` を導入し、`KindleApiService` と `main.ts` からイベントを発行するように変更。
+    *   `KindleApiService` の `fetchHighlights` と `_scrapePaginatedHighlightsForBook` メソッドを修正し、データ取得中の詳細な進捗イベント (`fetch:start`, `fetch:booklist:start`, `fetch:booklist:end`, `fetch:page:start`, `fetch:highlights:start`, `fetch:highlights:progress`, `fetch:highlights:end`, `fetch:page:end`, `fetch:end`, `fetch:error` など) を発行するようにした。
+    *   `main.ts` の `syncHighlights` と `saveHighlightsAsNotes` メソッドを修正し、ノート生成中の進捗イベント (`start`, `book:start`, `progress`, `book:end`, `end`, `error`) を発行するようにした。
+    *   ビルドエラー (`setIcon` の引数間違い) をデバッグし修正した。
 
 ## 3. 現在の決定事項・考慮事項
 
@@ -38,6 +49,6 @@
 ## 4. 次のステップ
 
 *   **リージョン対応の強化:** 現在ハードコードされている部分（例: `parseToDateString` のデフォルト、書籍URL生成）を、設定から取得したリージョン情報に基づいて動的に変更できるようにする。
-*   **リファクタリング:** ~~`KindleApiService` 内のパースロジックを、当初の計画通り `HighlightParser` サービスに分離することを検討する。~~ (完了)
+*   ~~**リファクタリング:** `KindleApiService` 内のパースロジックを、当初の計画通り `HighlightParser` サービスに分離することを検討する。~~ (完了)
 *   **テスト:** 異なるAmazonアカウント、異なる書籍、ハイライトがない場合など、様々なケースで動作確認を行う。
 *   **ログアウト処理の改善:** 現在のiframeベースのログアウトはベストエフォートであり、保持している `BrowserWindow` のセッションを確実にクリアする方法（`webContents.session.clearStorageData()` など）を検討・実装する。

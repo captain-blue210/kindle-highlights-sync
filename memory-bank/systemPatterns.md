@@ -16,13 +16,17 @@ graph TD
         MainPlugin -->|同期をトリガー| SyncProcess{同期ロジック}
         MainPlugin -->|ログインが必要| LoginModal(AmazonLoginModal / modals/AmazonLoginModal.ts) ;; 独立ウィンドウ生成
         MainPlugin -->|ログアウトが必要| LogoutProcess{ログアウトプロセス}
-        MainPlugin -->|ステータス表示| NoticeAPI[Obsidian Notice API]
+        MainPlugin -->|ステータス表示| SyncProgressModal(SyncProgressModal / modals/SyncProgressModal.ts) ;; イベント経由で更新
+        MainPlugin -->|イベント発行| Emitter((EventEmitter))
+        SyncProgressModal -->|イベント購読| Emitter
 
         SyncProcess --> KindleAPI(KindleApiService / services/kindle-api.ts)
         SyncProcess --> KindleAPI --> Parser(HighlightParser / services/highlight-parser.ts) ;; KindleAPIがParserを利用
         SyncProcess --> Renderer(TemplateRenderer / services/template-renderer.ts)
         SyncProcess --> MetadataService(MetadataService / services/metadata-service.ts)
         SyncProcess --> VaultAPI[Obsidian Vault API]
+        SyncProcess -->|イベント発行| Emitter ;; 同期中の詳細イベント
+
 
         LoginModal -->|Electron BrowserWindow生成/管理| AmazonLoginWindow[Amazon Login (別ウィンドウ)] ;; electron.remote経由
         LoginModal -->|成功/失敗(ウィンドウ参照含む)| MainPlugin
@@ -32,6 +36,8 @@ graph TD
         RemoteLoader -->|取得DOMを返す| KindleAPI
         KindleAPI -->|DOMを渡す| Parser
         Parser -->|構造化データを返す| KindleAPI
+        KindleAPI -->|イベント発行| Emitter ;; データ取得中の詳細イベント
+
 
         Renderer --> VaultAPI
     end
@@ -79,6 +85,7 @@ graph TD
 *   **設定による構成:** プラグインの動作は、標準のObsidian設定タブを通じてカスタマイズされる。
 *   **非同期操作:** API（Obsidian, Amazon）との対話やファイルシステム操作は非同期であり、`async/await`を使用する。
 *   **ユーティリティ関数:** `BrowserWindow` の操作ロジックは `loadRemoteDom` にカプセル化される。
+*   **イベント駆動 (UI更新):** 同期プロセスの進捗表示 (`SyncProgressModal`) は、Node.js の `EventEmitter` を介して行われる。`KindleApiService` や `main.ts` が同期の各段階でイベントを発行し、`SyncProgressModal` がそれを購読してUIを更新する。これにより、UIコンポーネントとバックグラウンド処理が疎結合になる。
 
 ## 4. 状態管理
 

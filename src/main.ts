@@ -1,5 +1,7 @@
+import { EventEmitter } from "events"; // Import EventEmitter
 import { Notice, Plugin, TFile } from "obsidian"; // Ensure App is imported
 import { AmazonLogoutModal } from "./modals/AmazonLogoutModal"; // Import Logout Modal
+import { SyncProgressModal } from "./modals/SyncProgressModal"; // Import Progress Modal
 import { Book, Highlight } from "./models";
 import { KindleApiService } from "./services/kindle-api"; // Import the service class
 import { fetchBookMetadata } from "./services/metadata-service";
@@ -60,9 +62,13 @@ export default class KindleHighlightsPlugin extends Plugin {
 	}
 
 	async syncHighlights() {
+		const emitter = new EventEmitter();
+		const progressModal = new SyncProgressModal(this.app, emitter);
+		progressModal.open();
+
 		try {
-			// 同期開始通知
-			new Notice("Starting Kindle highlights sync...");
+			// 同期開始通知 (Modalが代わりになる)
+			// new Notice("Starting Kindle highlights sync...");
 
 			// --- Step 1: Authentication (Check & Trigger) ---
 			let isLoggedIn = this.kindleApiService.isLoggedIn();
@@ -86,17 +92,27 @@ export default class KindleHighlightsPlugin extends Plugin {
 				return;
 			}
 
-			new Notice("Fetching highlights...");
+			// new Notice("Fetching highlights..."); // Modalが代わりになる
 
 			// --- Step 2: Fetch Highlights ---
 			// Use the service method
+			// --- Emit Start Event ---
+			// We need the total book count *before* starting the detailed processing.
+			// Let's assume fetchHighlights gives us this, or we modify it.
+			// For now, let's fetch first, then emit start. This isn't ideal for the UI
+			// but avoids modifying KindleApiService immediately.
 			const { books, highlights } =
 				await this.kindleApiService.fetchHighlights(
-					this.settings.amazonRegion
+					this.settings.amazonRegion,
+					emitter // ★ Pass emitter
 				);
-			new Notice(
-				`Found ${books.length} books and ${highlights.length} highlights.`
-			); // Add feedback
+
+			// Emit 'start' after fetching books to know the total count
+			emitter.emit("start", books.length);
+
+			// new Notice(
+			// 	`Found ${books.length} books and ${highlights.length} highlights.`
+			// ); // Modal will show progress
 
 			// メタデータの取得（オプション）
 			if (this.settings.downloadMetadata) {
@@ -107,15 +123,25 @@ export default class KindleHighlightsPlugin extends Plugin {
 			await this.ensureOutputDirectory();
 
 			// ハイライトをObsidianノートとして保存
-			await this.saveHighlightsAsNotes(books, highlights);
+			// Pass emitter to saveHighlightsAsNotes
+			await this.saveHighlightsAsNotes(books, highlights, emitter);
 
-			// 完了通知
-			new Notice(
-				`Kindle highlights sync completed. Imported ${books.length} books and ${highlights.length} highlights.`
-			);
+			// --- Emit End Event ---
+			emitter.emit("end");
+
+			// 完了通知 (Modalが代わりになる)
+			// new Notice(
+			// 	`Kindle highlights sync completed. Imported ${books.length} books and ${highlights.length} highlights.`
+			// );
 		} catch (error) {
 			console.error("Error syncing Kindle highlights:", error);
-			new Notice(`Error syncing Kindle highlights: ${error.message}`);
+			// --- Emit Error Event ---
+			emitter.emit("error", error.message || "Unknown error occurred");
+			// new Notice(`Error syncing Kindle highlights: ${error.message}`); // Modal handles error display
+		} finally {
+			// The modal should close itself based on 'end' or 'error' events.
+			// Additional checks here might be redundant or cause issues if the modal
+			// is already in the process of closing.
 		}
 	}
 
@@ -168,34 +194,79 @@ export default class KindleHighlightsPlugin extends Plugin {
 
 	private async saveHighlightsAsNotes(
 		books: Book[],
-		highlights: Highlight[]
+		highlights: Highlight[],
+		emitter: EventEmitter // Add emitter parameter
 	): Promise<void> {
 		for (const book of books) {
+			// --- Emit book:start ---
+			// We need the index or a counter for booksProcessedCount
+			const currentBookIndex = books.findIndex((b) => b.id === book.id); // Find index for count
+			const booksProcessedCount = currentBookIndex; // Index is 0-based, count should be too for 'start'
+
+			emitter.emit("book:start", {
+				bookTitle: book.title,
+				booksProcessedCount: booksProcessedCount, // Count before this book starts
+				totalBookCount: books.length,
+			});
+
 			// 書籍ごとのハイライトをフィルタリング
 			const bookHighlights = highlights.filter(
 				(h) => h.bookId === book.id
 			);
 
-			if (bookHighlights.length === 0) continue;
+			if (bookHighlights.length === 0) {
+				// Emit book:end even if no highlights
+				emitter.emit("book:end", {
+					bookTitle: book.title,
+					booksProcessedCount: booksProcessedCount + 1, // Increment count as this book is done
+					totalBookCount: books.length,
+				});
+				continue; // Skip to next book
+			}
 
-			// Format highlights into a Markdown list string
-			const highlightsString = bookHighlights
-				.map((h) => {
-					// Construct the appLink based on asin and location
-					let appLink = `kindle://book?action=open&asin=${book.asin}`;
-					if (h.location) {
-						appLink += `&location=${h.location}`;
-					}
+			// --- Process Highlights and Emit progress ---
+			const highlightItems: string[] = []; // Store formatted highlight strings
+			let highlightsProcessedCountForBook = 0;
 
-					// Use the appLink in the Markdown output
-					let item = `> ${h.text}\n> 位置: [${h.location}](${appLink})`; // <-- Link inserted here
-					if (h.note) {
-						// Indent note under the highlight
-						item += `\n  - Note: ${h.note}`;
-					}
-					return `${item}\n`;
-				})
-				.join("\n");
+			for (const highlight of bookHighlights) {
+				highlightsProcessedCountForBook++;
+
+				// Emit progress for each highlight
+				emitter.emit("progress", {
+					bookTitle: book.title,
+					booksProcessedCount: booksProcessedCount, // Count remains the same during this book's processing
+					totalBookCount: books.length,
+					highlightsProcessedCountForBook:
+						highlightsProcessedCountForBook,
+					currentHighlightText: highlight.text,
+				});
+
+				// Construct the appLink based on asin and location
+				let appLink = `kindle://book?action=open&asin=${book.asin}`;
+				if (highlight.location) {
+					appLink += `&location=${highlight.location}`;
+				}
+
+				// Format individual highlight item
+				let item = `> ${highlight.text}\n> 位置: [${highlight.location}](${appLink})`;
+				if (highlight.note) {
+					item += `\n  - Note: ${highlight.note}`;
+				}
+				highlightItems.push(`${item}\n`); // Add formatted item to array
+
+				// Optional: Add a small delay to make progress visible if sync is too fast
+				// await new Promise(resolve => setTimeout(resolve, 10));
+			}
+
+			// Join formatted highlights after the loop
+			const highlightsString = highlightItems.join("\n");
+
+			// --- Emit book:end ---
+			emitter.emit("book:end", {
+				bookTitle: book.title,
+				booksProcessedCount: booksProcessedCount + 1, // Increment count as this book is done
+				totalBookCount: books.length,
+			});
 
 			// Format lastAnnotatedDate (if available) to YYYY-MM-DD
 			const formattedLastAnnotatedDate = book.lastAnnotatedDate
