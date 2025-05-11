@@ -98,7 +98,6 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			);
 
 		// 2. テンプレート設定
-		// 2. テンプレート設定
 		const templateSetting = new Setting(containerEl)
 			.setName("Note Template")
 			.setDesc(
@@ -116,6 +115,17 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 				// Add monospace font for better template editing
 				text.inputEl.addClass("kindle-highlights-template-editor");
 			});
+
+		// Add edit button for template
+		templateSetting.addButton((button) => {
+			return button
+				.setIcon("edit")
+				.setTooltip("Edit template in modal")
+				.onClick(() => {
+					// Create and open modal for template editing
+					this.showTemplateEditorModal();
+				});
+		});
 
 		// Add help button for template variables
 		templateSetting.addButton((button) => {
@@ -184,11 +194,165 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 	}
 
 	/**
+	 * Shows a modal with template editor
+	 */
+	showTemplateEditorModal(): void {
+		const modal = new TemplateEditorModal(this.app, this.plugin);
+		modal.open();
+	}
+
+	/**
 	 * Shows a modal with template variables help
 	 */
 	showTemplateVariablesModal(): void {
 		const modal = new TemplateVariablesModal(this.app);
 		modal.open();
+	}
+}
+
+/**
+ * Modal for editing template
+ */
+class TemplateEditorModal extends Modal {
+	plugin: KindleHighlightsPlugin;
+	templateContent: string;
+
+	constructor(app: App, plugin: KindleHighlightsPlugin) {
+		super(app);
+		this.plugin = plugin;
+		this.templateContent = plugin.settings.templateContent;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+
+		// Add title
+		contentEl.createEl("h2", { text: "Edit Template" });
+
+		// Add description
+		contentEl.createEl("p", {
+			text: "Edit your template below. Changes will be automatically saved when you close this modal.",
+		});
+
+		// Add variables help link
+		const helpLink = contentEl.createEl("a", {
+			text: "Show available variables",
+			href: "#",
+		});
+		helpLink.addEventListener("click", (e) => {
+			e.preventDefault();
+			const modal = new TemplateVariablesModal(this.app);
+			modal.open();
+		});
+
+		// Create editor container
+		const editorContainer = contentEl.createEl("div", {
+			cls: "template-editor-container",
+		});
+
+		// Create textarea
+		const textarea = editorContainer.createEl("textarea", {
+			cls: "template-editor-textarea",
+		});
+		textarea.value = this.templateContent;
+		textarea.addEventListener("input", (e) => {
+			this.templateContent = (e.target as HTMLTextAreaElement).value;
+		});
+
+		// Add buttons
+		const buttonContainer = contentEl.createEl("div", {
+			cls: "template-editor-buttons",
+		});
+
+		// Reset button
+		const resetButton = buttonContainer.createEl("button", {
+			text: "Reset to Default",
+			cls: "template-editor-button",
+		});
+		resetButton.addEventListener("click", () => {
+			textarea.value = DEFAULT_SETTINGS.templateContent;
+			this.templateContent = DEFAULT_SETTINGS.templateContent;
+		});
+
+		// Save button
+		const saveButton = buttonContainer.createEl("button", {
+			text: "Save",
+			cls: "template-editor-button template-editor-save-button",
+		});
+		saveButton.addEventListener("click", async () => {
+			await this.saveTemplate();
+			this.close();
+		});
+
+		// Add CSS for the modal
+		const styleEl = document.createElement("style");
+		styleEl.textContent = `
+			.template-editor-container {
+				margin: 20px 0;
+			}
+			.template-editor-textarea {
+				width: 100%;
+				height: 400px;
+				font-family: monospace;
+				line-height: 1.5;
+				padding: 10px;
+				border: 1px solid var(--background-modifier-border);
+				border-radius: 4px;
+				background-color: var(--background-primary);
+				color: var(--text-normal);
+				resize: vertical;
+			}
+			.template-editor-buttons {
+				display: flex;
+				justify-content: flex-end;
+				margin-top: 10px;
+				gap: 10px;
+			}
+			.template-editor-button {
+				padding: 6px 12px;
+				border-radius: 4px;
+				background-color: var(--background-secondary);
+				border: 1px solid var(--background-modifier-border);
+				color: var(--text-normal);
+				cursor: pointer;
+			}
+			.template-editor-button:hover {
+				background-color: var(--background-secondary-alt);
+			}
+			.template-editor-save-button {
+				background-color: var(--interactive-accent);
+				color: var(--text-on-accent);
+			}
+			.template-editor-save-button:hover {
+				background-color: var(--interactive-accent-hover);
+			}
+		`;
+		document.head.appendChild(styleEl);
+
+		// Add class to modal for styling
+		const modalEl = document.querySelector(".modal") as HTMLElement;
+		if (modalEl) {
+			modalEl.classList.add("template-editor-modal");
+			// Make the modal larger
+			modalEl.style.width = "80%";
+			modalEl.style.height = "80%";
+		}
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		// Save template content
+		this.saveTemplate();
+		contentEl.empty();
+	}
+
+	/**
+	 * Saves the template content to plugin settings
+	 */
+	async saveTemplate() {
+		this.plugin.settings.templateContent = this.templateContent;
+		await this.plugin.saveSettings();
 	}
 }
 
