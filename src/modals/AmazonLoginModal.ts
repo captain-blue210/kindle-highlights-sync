@@ -1,5 +1,6 @@
 // Removed import type - rely on @types/electron and require
 import { Notice } from "obsidian";
+import { t } from "../i18n"; // Import t function
 import { getRegionUrls } from "../services/kindle-api"; // Import helper
 
 // Attempt to import Electron remote module using window.require
@@ -81,9 +82,7 @@ export class AmazonLoginModal {
 			!this.notebookUrl ||
 			!BrowserWindow
 		) {
-			new Notice(
-				"Error: Cannot initiate login. Invalid Amazon region configuration or Electron components unavailable."
-			);
+			new Notice(t("modals.amazonLogin.errors.cannotInitiate"));
 			this.resolvePromise({ success: false }); // Resolve immediately if prerequisites fail
 			return this.loginPromise; // Return the already resolved promise
 		}
@@ -111,7 +110,9 @@ export class AmazonLoginModal {
 				if (this.modal) {
 					// Keep inner null check for safety within callback
 					this.modal.setTitle(
-						`Amazon (${this.region}) Login - Kindle Highlights Sync`
+						t("modals.amazonLogin.windowTitle", {
+							region: this.region,
+						})
 					);
 					this.modal.show();
 					console.log("AmazonLoginModal: Login window shown.");
@@ -132,7 +133,7 @@ export class AmazonLoginModal {
 					console.log(
 						"AmazonLoginModal: Success detected (Cloud Reader URL)."
 					);
-					new Notice("Amazon login successful!");
+					new Notice(t("modals.amazonLogin.success"));
 					// Resolve with success and the window instance (if not null)
 					this.resolvePromise({
 						success: true,

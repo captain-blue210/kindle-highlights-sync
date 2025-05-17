@@ -1,4 +1,5 @@
 import { App, Modal, Notice } from "obsidian";
+import { t } from "../i18n"; // Import t function
 import { KindleApiService } from "../services/kindle-api";
 
 export class AmazonLogoutModal extends Modal {
@@ -15,12 +16,12 @@ export class AmazonLogoutModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass("amazon-logout-modal");
 
-		contentEl.createEl("h2", { text: "Amazon Logout Confirmation" });
+		contentEl.createEl("h2", { text: t("modals.amazonLogout.title") });
 		contentEl.createEl("p", {
-			text: "Are you sure you want to log out from your Amazon Kindle session within Obsidian?",
+			text: t("modals.amazonLogout.confirmationText"),
 		});
 		contentEl.createEl("p", {
-			text: "Note: This attempts to clear the session. You may need to log in again next time.",
+			text: t("modals.amazonLogout.noteText"),
 			cls: "mod-warning",
 		});
 
@@ -30,24 +31,28 @@ export class AmazonLogoutModal extends Modal {
 
 		// Logout Button
 		const logoutButton = buttonContainer.createEl("button", {
-			text: "Logout",
+			text: t("modals.amazonLogout.buttons.logout"),
 			cls: "mod-cta", // Call to action style
 		});
 		logoutButton.onclick = async () => {
-			new Notice("Logging out...");
+			new Notice(t("modals.amazonLogout.loggingOut"));
 			this.close(); // Close modal first
 			try {
 				await this.kindleApiService.logout(this.region); // Pass region to logout method
-				// Notice is handled within the service logout method now
+				// Notice for successful logout should be handled by the service or here if needed
 			} catch (error) {
 				console.error("Error during logout:", error);
-				new Notice(`Logout failed: ${error.message}`);
+				new Notice(
+					t("modals.amazonLogout.errors.logoutFailed", {
+						errorMessage: error.message,
+					})
+				);
 			}
 		};
 
 		// Cancel Button
 		const cancelButton = buttonContainer.createEl("button", {
-			text: "Cancel",
+			text: t("modals.amazonLogout.buttons.cancel"),
 		});
 		cancelButton.onclick = () => {
 			this.close();

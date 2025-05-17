@@ -1,0 +1,115 @@
+{
+	"commands": {
+		"syncKindleHighlights": {
+			"name": "Sync Kindle Highlights"
+		},
+		"logoutKindle": {
+			"name": "Logout from Kindle"
+		}
+	},
+	"ribbon": {
+		"syncKindleHighlights": {
+			"tooltip": "Sync Kindle Highlights"
+		}
+	},
+	"sync": {
+		"starting": "Starting Kindle highlights sync...",
+		"sessionNotFound": "Amazon session not found. Please log in.",
+		"loginCancelledOrFailed": "Kindle login cancelled or failed.",
+		"loginRequired": "Login required to sync highlights.",
+		"fetchingHighlights": "Fetching highlights...",
+		"foundBooksAndHighlights": "Found {{bookCount}} books and {{highlightCount}} highlights.",
+		"completed": "Kindle highlights sync completed. Imported {{bookCount}} books and {{highlightCount}} highlights.",
+		"error": "Error syncing Kindle highlights: {{errorMessage}}",
+		"templateError": "Template Error for \"{{bookTitle}}\": {{errorMessage}}. Skipping this book.",
+		"unknownError": "Unknown error",
+		"fileProcessingError": "Error processing file: {{filePath}}. File object not found."
+	},
+	"noteOutput": {
+		"locationLabel": "Location",
+		"noteLabel": "Note"
+	},
+	"settings": {
+		"outputDirectory": {
+			"name": "Output Directory",
+			"description": "Directory where highlights will be saved",
+			"placeholder": "Kindle Highlights"
+		},
+		"noteTemplate": {
+			"title": "Note Template",
+			"description": "Edit your template below (uses Nunjucks syntax). See Nunjucks documentation for details. Click on a variable to insert it into the template.",
+			"resetButton": "Reset to Default",
+			"variables": {
+				"title": "Available Variables",
+				"headerVariable": "Variable",
+				"headerDescription": "Description",
+				"bookTitle": "Book title",
+				"bookAuthor": "Book author",
+				"authorUrl": "URL to author's page (if available)",
+				"imageUrl": "URL to book cover image",
+				"highlightsCount": "Number of highlights in the book",
+				"lastAnnotatedDate": "Date of last highlight",
+				"publicationDate": "Book publication date",
+				"publisher": "Book publisher",
+				"amazonUrl": "URL to book on Amazon",
+				"kindleAppLink": "Kindle app deep link",
+				"asin": "Amazon Standard Identification Number",
+				"preRenderedHighlights": "Pre-rendered list of highlights"
+			},
+			"syntaxExamples": {
+				"title": "Example",
+				"conditional": {
+					"title": "Conditional"
+				},
+				"fallback": {
+					"title": "Fallback Values"
+				}
+			}
+		},
+		"amazonRegion": {
+			"name": "Amazon Region",
+			"description": "Select your Amazon Kindle region",
+			"invalidRegionError": "Invalid Amazon region selected: {{value}}. Reverting to default.",
+			"regions": {
+				"com": "USA (.com)",
+				"co.jp": "Japan (.co.jp)",
+				"co.uk": "UK (.co.uk)",
+				"de": "Germany (.de)",
+				"fr": "France (.fr)",
+				"es": "Spain (.es)",
+				"it": "Italy (.it)",
+				"ca": "Canada (.ca)",
+				"com.au": "Australia (.com.au)",
+				"com.br": "Brazil (.com.br)",
+				"com.mx": "Mexico (.com.mx)",
+				"in": "India (.in)"
+			}
+		},
+		"downloadMetadata": {
+			"name": "Download Metadata",
+			"description": "Download book metadata (cover, publication date, etc.)"
+		}
+	},
+	"modals": {
+		"amazonLogin": {
+			"windowTitle": "Amazon ({{region}}) Login - Kindle Highlights Sync",
+			"errors": {
+				"cannotInitiate": "Error: Cannot initiate login. Invalid Amazon region configuration or Electron components unavailable."
+			},
+			"success": "Amazon login successful!"
+		},
+		"amazonLogout": {
+			"title": "Amazon Logout Confirmation",
+			"confirmationText": "Are you sure you want to log out from your Amazon Kindle session within Obsidian?",
+			"noteText": "Note: This attempts to clear the session. You may need to log in again next time.",
+			"buttons": {
+				"logout": "Logout",
+				"cancel": "Cancel"
+			},
+			"loggingOut": "Logging out...",
+			"errors": {
+				"logoutFailed": "Logout failed: {{errorMessage}}"
+			}
+		}
+	}
+}
