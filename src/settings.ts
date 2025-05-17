@@ -1,5 +1,5 @@
 // settings.ts
-import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian"; // Modal を削除
 import KindleHighlightsPlugin from "./main";
 
 // Define supported Amazon regions
@@ -27,7 +27,6 @@ export interface KindleHighlightsSettings {
 
 export const DEFAULT_SETTINGS: KindleHighlightsSettings = {
 	outputDirectory: "Kindle Highlights",
-	// Updated default template using Nunjucks syntax
 	templateContent: `---
 aliases:
 tags: []
@@ -98,67 +97,235 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			);
 
 		// 2. テンプレート設定
-		const templateSetting = new Setting(containerEl)
-			.setName("Note Template")
-			.setDesc(
-				"Template for generated notes (uses Nunjucks syntax). See Nunjucks documentation for details."
-			)
-			.addTextArea((text) => {
-				text.setPlaceholder(DEFAULT_SETTINGS.templateContent)
-					.setValue(this.plugin.settings.templateContent)
-					.onChange(async (value) => {
-						this.plugin.settings.templateContent = value;
-						await this.plugin.saveSettings();
-					});
-				// Make the text area taller
-				text.inputEl.setAttr("rows", 20);
-				// Add monospace font for better template editing
-				text.inputEl.addClass("kindle-highlights-template-editor");
+		const templateSettingContainer = containerEl.createDiv({
+			cls: "kindle-template-setting-container",
+		});
+		templateSettingContainer.createEl("h3", { text: "Note Template" });
+		templateSettingContainer.createEl("p", {
+			text: "Edit your template below (uses Nunjucks syntax). See Nunjucks documentation for details. Click on a variable to insert it into the template.",
+			cls: "setting-item-description",
+		});
+
+		const templateEditorLayout = templateSettingContainer.createDiv({
+			cls: "kindle-template-editor-layout",
+		});
+
+		const editorColumn = templateEditorLayout.createDiv({
+			cls: "kindle-template-editor-column",
+		});
+
+		const templateTextarea = editorColumn.createEl("textarea", {
+			cls: "kindle-template-editor-textarea",
+		});
+		templateTextarea.value = this.plugin.settings.templateContent;
+		templateTextarea.addEventListener("input", async (e) => {
+			this.plugin.settings.templateContent = (
+				e.target as HTMLTextAreaElement
+			).value;
+			await this.plugin.saveSettings();
+		});
+
+		const resetButton = editorColumn.createEl("button", {
+			text: "Reset to Default",
+			cls: "kindle-template-editor-button",
+		});
+		resetButton.addEventListener("click", async () => {
+			templateTextarea.value = DEFAULT_SETTINGS.templateContent;
+			this.plugin.settings.templateContent =
+				DEFAULT_SETTINGS.templateContent;
+			await this.plugin.saveSettings();
+		});
+
+		const variablesColumn = templateEditorLayout.createDiv({
+			cls: "kindle-template-variables-column",
+		});
+		variablesColumn.createEl("h4", { text: "Available Variables" });
+
+		const variablesTable = variablesColumn.createEl("table", {
+			cls: "kindle-variables-table",
+		});
+		const tableHead = variablesTable.createEl("thead");
+		const headerRow = tableHead.createEl("tr");
+		headerRow.createEl("th", { text: "Variable" });
+		headerRow.createEl("th", { text: "Description" });
+
+		const tableBody = variablesTable.createEl("tbody");
+
+		const templateVariables = [
+			{ name: "title", description: "Book title" },
+			{ name: "author", description: "Book author" },
+			{
+				name: "authorUrl",
+				description: "URL to author's page (if available)",
+			},
+			{ name: "imageUrl", description: "URL to book cover image" },
+			{
+				name: "highlightsCount",
+				description: "Number of highlights in the book",
+			},
+			{
+				name: "lastAnnotatedDate",
+				description: "Date of last highlight",
+			},
+			{ name: "publicationDate", description: "Book publication date" },
+			{ name: "publisher", description: "Book publisher" },
+			{ name: "url", description: "URL to book on Amazon" },
+			{ name: "appLink", description: "Kindle app deep link" },
+			{
+				name: "asin",
+				description: "Amazon Standard Identification Number",
+			},
+			{
+				name: "highlights",
+				description: "Pre-rendered list of highlights",
+			},
+		];
+
+		templateVariables.forEach((variable) => {
+			const row = tableBody.createEl("tr");
+			const nameCell = row.createEl("td");
+			const nameLink = nameCell.createEl("a", {
+				text: `{{ ${variable.name} }}`,
+				href: "#",
+				cls: "kindle-variable-insert-link",
 			});
-
-		// Add edit button for template
-		templateSetting.addButton((button) => {
-			return button
-				.setIcon("edit")
-				.setTooltip("Edit template in modal")
-				.onClick(() => {
-					// Create and open modal for template editing
-					this.showTemplateEditorModal();
-				});
+			nameLink.addEventListener("click", (e) => {
+				e.preventDefault();
+				const varToInsert = `{{ ${variable.name} }}`;
+				const cursorPos = templateTextarea.selectionStart;
+				const currentValue = templateTextarea.value;
+				templateTextarea.value =
+					currentValue.substring(0, cursorPos) +
+					varToInsert +
+					currentValue.substring(templateTextarea.selectionEnd);
+				templateTextarea.selectionStart =
+					templateTextarea.selectionEnd =
+						cursorPos + varToInsert.length;
+				templateTextarea.focus();
+				templateTextarea.dispatchEvent(new Event("input"));
+			});
+			row.createEl("td", { text: variable.description });
 		});
 
-		// Add help button for template variables
-		templateSetting.addButton((button) => {
-			return button
-				.setIcon("help-circle")
-				.setTooltip("Show template variables")
-				.onClick(() => {
-					// Create and open modal with template variables help
-					this.showTemplateVariablesModal();
-				});
+		variablesColumn.createEl("h4", { text: "Nunjucks Syntax Examples" });
+		const examplesContainer = variablesColumn.createDiv({
+			cls: "kindle-syntax-examples",
 		});
+		this.addCodeExampleHelper(
+			examplesContainer,
+			"Conditional",
+			`{% if author %}
+- Author: {{ author }}
+{% endif %}`
+		);
+		this.addCodeExampleHelper(
+			examplesContainer,
+			"Fallback Values",
+			`{{ title or 'Untitled Book' }}
+{{ author or 'Unknown Author' }}`
+		);
 
-		// Add CSS for template editor
 		const styleEl = document.createElement("style");
 		styleEl.textContent = `
-			.kindle-highlights-template-editor {
+			.kindle-template-setting-container {
+				margin-top: 20px;
+				border-top: 1px solid var(--background-modifier-border);
+				padding-top: 20px;
+			}
+			.kindle-template-editor-layout {
+				margin-top: 10px;
+			}
+			.kindle-template-editor-column {
+				display: flex;
+				flex-direction: column;
+				margin-bottom: 25px; 
+			}
+			.kindle-template-variables-column {
+				max-height: 450px; 
+				overflow-y: auto;
+				overflow-x: auto; 
+				border-top: 1px solid var(--background-modifier-border); 
+				padding-top: 15px; 
+				padding-right: 10px; /* Added right padding */
+				margin-top: 20px; 
+			}
+			.kindle-template-editor-textarea {
+				width: 100%;
+				height: 300px; 
 				font-family: monospace;
 				line-height: 1.5;
+				padding: 10px;
+				border: 1px solid var(--background-modifier-border);
+				border-radius: 4px;
+				background-color: var(--background-primary);
+				color: var(--text-normal);
+				resize: vertical;
+				margin-bottom: 10px;
+			}
+			.kindle-template-editor-button {
+				padding: 8px 15px;
+				border-radius: 4px;
+				background-color: var(--background-secondary);
+				border: 1px solid var(--background-modifier-border);
+				color: var(--text-normal);
+				cursor: pointer;
+				align-self: flex-start; 
+			}
+			.kindle-template-editor-button:hover {
+				background-color: var(--background-secondary-alt);
+			}
+			.kindle-variables-table {
+				width: 100%;
+				border-collapse: collapse;
+				margin-bottom: 15px;
+				font-size: 0.9em;
+				table-layout: fixed; 
+			}
+			.kindle-variables-table th, .kindle-variables-table td {
+				border: 1px solid var(--background-modifier-border);
+				padding: 6px;
+				text-align: left;
+				word-break: break-word; 
+			}
+			.kindle-variables-table th {
+				background-color: var(--background-secondary);
+			}
+			.kindle-variables-table th:nth-child(1),
+			.kindle-variables-table td:nth-child(1) {
+    			width: 35%; 
+			}
+			.kindle-variables-table th:nth-child(2),
+			.kindle-variables-table td:nth-child(2) {
+    			width: 65%; 
+			}
+			.kindle-variable-insert-link {
+				text-decoration: none;
+				color: var(--text-accent);
+			}
+			.kindle-variable-insert-link:hover {
+				text-decoration: underline;
+			}
+			.kindle-syntax-examples h4 {
+				margin-top: 10px;
+				margin-bottom: 5px;
+			}
+			.kindle-syntax-examples pre {
+				background-color: var(--background-secondary);
+				padding: 8px;
+				border-radius: 4px;
+				overflow-x: auto;
+				font-size: 0.85em;
 			}
 		`;
 		document.head.appendChild(styleEl);
 
-		// 3. Amazonリージョン設定 (Dropdown)
 		new Setting(containerEl)
 			.setName("Amazon Region")
 			.setDesc("Select your Amazon Kindle region")
 			.addDropdown((dropdown) => {
-				// Add regions to dropdown
 				for (const key in AMAZON_REGIONS) {
 					dropdown.addOption(key, AMAZON_REGIONS[key]);
 				}
-
-				// Set current value and handle change
 				dropdown
 					.setValue(this.plugin.settings.amazonRegion)
 					.onChange(async (value) => {
@@ -166,20 +333,17 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 							this.plugin.settings.amazonRegion = value;
 							await this.plugin.saveSettings();
 						} else {
-							// Handle potential invalid value if settings get corrupted
 							new Notice(
 								`Invalid Amazon region selected: ${value}. Reverting to default.`
 							);
 							this.plugin.settings.amazonRegion =
 								DEFAULT_SETTINGS.amazonRegion;
 							await this.plugin.saveSettings();
-							// Refresh the settings display to show the reverted value
 							this.display();
 						}
 					});
 			});
 
-		// 4. メタデータダウンロード設定
 		new Setting(containerEl)
 			.setName("Download Metadata")
 			.setDesc("Download book metadata (cover, publication date, etc.)")
@@ -193,366 +357,14 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			);
 	}
 
-	/**
-	 * Shows a modal with template editor
-	 */
-	showTemplateEditorModal(): void {
-		const modal = new TemplateEditorModal(this.app, this.plugin);
-		modal.open();
-	}
-
-	/**
-	 * Shows a modal with template variables help
-	 */
-	showTemplateVariablesModal(): void {
-		const modal = new TemplateVariablesModal(this.app);
-		modal.open();
-	}
-}
-
-/**
- * Modal for editing template
- */
-class TemplateEditorModal extends Modal {
-	plugin: KindleHighlightsPlugin;
-	templateContent: string;
-
-	constructor(app: App, plugin: KindleHighlightsPlugin) {
-		super(app);
-		this.plugin = plugin;
-		this.templateContent = plugin.settings.templateContent;
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.empty();
-
-		// Add title
-		contentEl.createEl("h2", { text: "Edit Template" });
-
-		// Add description
-		contentEl.createEl("p", {
-			text: "Edit your template below. Changes will be automatically saved when you close this modal.",
-		});
-
-		// Add variables help link
-		const helpLink = contentEl.createEl("a", {
-			text: "Show available variables",
-			href: "#",
-		});
-		helpLink.addEventListener("click", (e) => {
-			e.preventDefault();
-			const modal = new TemplateVariablesModal(this.app);
-			modal.open();
-		});
-
-		// Create editor container
-		const editorContainer = contentEl.createEl("div", {
-			cls: "template-editor-container",
-		});
-
-		// Create textarea
-		const textarea = editorContainer.createEl("textarea", {
-			cls: "template-editor-textarea",
-		});
-		textarea.value = this.templateContent;
-		textarea.addEventListener("input", (e) => {
-			this.templateContent = (e.target as HTMLTextAreaElement).value;
-		});
-
-		// Add buttons
-		const buttonContainer = contentEl.createEl("div", {
-			cls: "template-editor-buttons",
-		});
-
-		// Reset button
-		const resetButton = buttonContainer.createEl("button", {
-			text: "Reset to Default",
-			cls: "template-editor-button",
-		});
-		resetButton.addEventListener("click", () => {
-			textarea.value = DEFAULT_SETTINGS.templateContent;
-			this.templateContent = DEFAULT_SETTINGS.templateContent;
-		});
-
-		// Save button
-		const saveButton = buttonContainer.createEl("button", {
-			text: "Save",
-			cls: "template-editor-button template-editor-save-button",
-		});
-		saveButton.addEventListener("click", async () => {
-			await this.saveTemplate();
-			this.close();
-		});
-
-		// Add CSS for the modal
-		const styleEl = document.createElement("style");
-		styleEl.textContent = `
-			.template-editor-container {
-				margin: 20px 0;
-			}
-			.template-editor-textarea {
-				width: 100%;
-				height: 400px;
-				font-family: monospace;
-				line-height: 1.5;
-				padding: 10px;
-				border: 1px solid var(--background-modifier-border);
-				border-radius: 4px;
-				background-color: var(--background-primary);
-				color: var(--text-normal);
-				resize: vertical;
-			}
-			.template-editor-buttons {
-				display: flex;
-				justify-content: flex-end;
-				margin-top: 10px;
-				gap: 10px;
-			}
-			.template-editor-button {
-				padding: 6px 12px;
-				border-radius: 4px;
-				background-color: var(--background-secondary);
-				border: 1px solid var(--background-modifier-border);
-				color: var(--text-normal);
-				cursor: pointer;
-			}
-			.template-editor-button:hover {
-				background-color: var(--background-secondary-alt);
-			}
-			.template-editor-save-button {
-				background-color: var(--interactive-accent);
-				color: var(--text-on-accent);
-			}
-			.template-editor-save-button:hover {
-				background-color: var(--interactive-accent-hover);
-			}
-		`;
-		document.head.appendChild(styleEl);
-
-		// Add class to modal for styling
-		const modalEl = document.querySelector(".modal") as HTMLElement;
-		if (modalEl) {
-			modalEl.classList.add("template-editor-modal");
-			// Make the modal larger
-			modalEl.style.width = "80%";
-			modalEl.style.height = "80%";
-		}
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		// Save template content
-		this.saveTemplate();
-		contentEl.empty();
-	}
-
-	/**
-	 * Saves the template content to plugin settings
-	 */
-	async saveTemplate() {
-		this.plugin.settings.templateContent = this.templateContent;
-		await this.plugin.saveSettings();
-	}
-}
-
-/**
- * Modal for displaying template variables help
- */
-class TemplateVariablesModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.empty();
-
-		contentEl.createEl("h2", { text: "Template Variables" });
-
-		// Add description
-		contentEl.createEl("p", {
-			text: "The following variables are available in your template. Use them with Nunjucks syntax, e.g., {{ title }} or {% if author %}Author: {{ author }}{% endif %}",
-		});
-
-		// Create table for variables
-		const table = contentEl.createEl("table");
-		const thead = table.createEl("thead");
-		const headerRow = thead.createEl("tr");
-		headerRow.createEl("th", { text: "Variable" });
-		headerRow.createEl("th", { text: "Description" });
-		headerRow.createEl("th", { text: "Example" });
-
-		const tbody = table.createEl("tbody");
-
-		// Book variables
-		this.addVariableRow(tbody, "title", "Book title", "The Great Gatsby");
-		this.addVariableRow(
-			tbody,
-			"author",
-			"Book author",
-			"F. Scott Fitzgerald"
-		);
-		this.addVariableRow(
-			tbody,
-			"authorUrl",
-			"URL to author's page (if available)",
-			"https://amazon.com/author/..."
-		);
-		this.addVariableRow(
-			tbody,
-			"imageUrl",
-			"URL to book cover image",
-			"https://images-na.ssl-images-amazon.com/..."
-		);
-		this.addVariableRow(
-			tbody,
-			"highlightsCount",
-			"Number of highlights in the book",
-			"42"
-		);
-		this.addVariableRow(
-			tbody,
-			"lastAnnotatedDate",
-			"Date of last highlight",
-			"2025-03-15"
-		);
-		this.addVariableRow(
-			tbody,
-			"publicationDate",
-			"Book publication date",
-			"2024-01-01"
-		);
-		this.addVariableRow(
-			tbody,
-			"publisher",
-			"Book publisher",
-			"Penguin Books"
-		);
-		this.addVariableRow(
-			tbody,
-			"url",
-			"URL to book on Amazon",
-			"https://amazon.com/dp/..."
-		);
-		this.addVariableRow(
-			tbody,
-			"appLink",
-			"Kindle app deep link",
-			"kindle://book?action=open&asin=..."
-		);
-		this.addVariableRow(
-			tbody,
-			"asin",
-			"Amazon Standard Identification Number",
-			"B01N0XQL9Z"
-		);
-
-		// Highlight variables
-		this.addVariableRow(
-			tbody,
-			"highlights",
-			"Pre-rendered list of highlights",
-			"- Highlight 1\n- Highlight 2"
-		);
-
-		// Add section for Nunjucks syntax examples
-		contentEl.createEl("h3", { text: "Nunjucks Syntax Examples" });
-
-		const codeExamples = contentEl.createEl("div", {
-			cls: "template-code-examples",
-		});
-
-		// Conditional example
-		this.addCodeExample(
-			codeExamples,
-			"Conditional",
-			`{% if author %}
-- Author: {{ author }}
-{% endif %}`
-		);
-
-		// Loop example
-		this.addCodeExample(
-			codeExamples,
-			"Variables with fallbacks",
-			`{{ title or 'Untitled Book' }}
-{{ author or 'Unknown Author' }}`
-		);
-
-		// Add CSS for the modal
-		const styleEl = document.createElement("style");
-		styleEl.textContent = `
-			.template-variables-modal table {
-				border-collapse: collapse;
-				width: 100%;
-				margin-bottom: 20px;
-			}
-			.template-variables-modal th, .template-variables-modal td {
-				border: 1px solid var(--background-modifier-border);
-				padding: 8px;
-			}
-			.template-variables-modal th {
-				background-color: var(--background-secondary);
-				text-align: left;
-			}
-			.template-variables-modal tr:nth-child(even) {
-				background-color: var(--background-secondary);
-			}
-			.template-code-examples {
-				margin-top: 20px;
-			}
-			.template-code-example {
-				margin-bottom: 15px;
-			}
-			.template-code-example h4 {
-				margin-bottom: 5px;
-			}
-			.template-code-example pre {
-				background-color: var(--background-secondary);
-				padding: 10px;
-				border-radius: 4px;
-				overflow-x: auto;
-			}
-		`;
-		document.head.appendChild(styleEl);
-
-		// Add class to modal for styling
-		const modalEl = document.querySelector(".modal") as HTMLElement;
-		if (modalEl) {
-			modalEl.classList.add("template-variables-modal");
-		}
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
-
-	/**
-	 * Adds a variable row to the table
-	 */
-	addVariableRow(
-		tbody: HTMLTableSectionElement,
-		name: string,
-		description: string,
-		example: string
+	private addCodeExampleHelper(
+		container: HTMLElement,
+		title: string,
+		code: string
 	): void {
-		const row = tbody.createEl("tr");
-		row.createEl("td", { text: name });
-		row.createEl("td", { text: description });
-		row.createEl("td", { text: example });
-	}
-
-	/**
-	 * Adds a code example to the container
-	 */
-	addCodeExample(container: HTMLElement, title: string, code: string): void {
-		const example = container.createEl("div", {
-			cls: "template-code-example",
-		});
-		example.createEl("h4", { text: title });
-		const pre = example.createEl("pre");
+		const exampleDiv = container.createEl("div");
+		exampleDiv.createEl("h4", { text: title });
+		const pre = exampleDiv.createEl("pre");
 		pre.createEl("code", { text: code });
 	}
 }
