@@ -53,6 +53,11 @@ export default class KindleHighlightsPlugin extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+
+		// Add ribbon icon at the end
+		this.addRibbonIcon("download", "Sync Kindle Highlights", () =>
+			this.syncHighlights()
+		);
 	}
 
 	async saveSettings() {
