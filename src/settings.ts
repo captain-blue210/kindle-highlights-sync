@@ -2,6 +2,7 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian"; // Modal を削除
 import { t } from "./i18n"; // Import t function
 import KindleHighlightsPlugin from "./main";
+import { renderTemplate } from "./services/template-renderer";
 
 // Define supported Amazon regions (keys will be used for translation keys)
 const AMAZON_REGION_KEYS: string[] = [
@@ -121,11 +122,49 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			cls: "kindle-template-editor-textarea",
 		});
 		templateTextarea.value = this.plugin.settings.templateContent;
+		
+		// Create preview column
+		const previewColumn = templateEditorLayout.createDiv({
+			cls: "kindle-template-preview-column",
+		});
+		previewColumn.createEl("h4", {
+			text: t("settings.noteTemplate.preview.title"),
+		});
+		previewColumn.createEl("p", {
+			text: t("settings.noteTemplate.preview.description"),
+			cls: "setting-item-description",
+		});
+
+		const previewContainer = previewColumn.createDiv({
+			cls: "kindle-template-preview-container",
+		});
+
+		// Function to update preview
+		const updatePreview = () => {
+			try {
+				const sampleData = this.createSampleTemplateData();
+				const rendered = renderTemplate(templateTextarea.value, sampleData);
+				previewContainer.innerHTML = `<pre class="kindle-template-preview-content">${rendered}</pre>`;
+			} catch (error) {
+				previewContainer.innerHTML = `
+					<div class="kindle-template-preview-error">
+						<h5>${t("settings.noteTemplate.preview.errorTitle")}</h5>
+						<p>${t("settings.noteTemplate.preview.errorDescription")}</p>
+						<pre class="kindle-template-error-details">${error.message || error}</pre>
+					</div>
+				`;
+			}
+		};
+
+		// Initial preview render
+		updatePreview();
+
 		templateTextarea.addEventListener("input", async (e) => {
 			this.plugin.settings.templateContent = (
 				e.target as HTMLTextAreaElement
 			).value;
 			await this.plugin.saveSettings();
+			updatePreview(); // Update preview on change
 		});
 
 		const resetButton = editorColumn.createEl("button", {
@@ -137,6 +176,7 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			this.plugin.settings.templateContent =
 				DEFAULT_SETTINGS.templateContent;
 			await this.plugin.saveSettings();
+			updatePreview(); // Update preview after reset
 		});
 
 		const variablesColumn = templateEditorLayout.createDiv({
@@ -237,6 +277,7 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 						cursorPos + varToInsert.length;
 				templateTextarea.focus();
 				templateTextarea.dispatchEvent(new Event("input"));
+				updatePreview(); // Update preview after variable insertion
 			});
 			row.createEl("td", { text: t(variable.descriptionKey) });
 		});
@@ -270,11 +311,57 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			}
 			.kindle-template-editor-layout {
 				margin-top: 10px;
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 20px;
 			}
 			.kindle-template-editor-column {
 				display: flex;
 				flex-direction: column;
 				margin-bottom: 25px; 
+			}
+			.kindle-template-preview-column {
+				display: flex;
+				flex-direction: column;
+				margin-bottom: 25px;
+			}
+			.kindle-template-preview-container {
+				flex: 1;
+				border: 1px solid var(--background-modifier-border);
+				border-radius: 4px;
+				overflow: auto;
+				max-height: 350px;
+				background-color: var(--background-primary);
+			}
+			.kindle-template-preview-content {
+				margin: 0;
+				padding: 10px;
+				white-space: pre-wrap;
+				word-wrap: break-word;
+				font-family: var(--font-text);
+				font-size: 0.9em;
+				line-height: 1.5;
+				background: transparent;
+			}
+			.kindle-template-preview-error {
+				padding: 15px;
+				color: var(--text-error);
+			}
+			.kindle-template-preview-error h5 {
+				margin: 0 0 8px 0;
+				color: var(--text-error);
+			}
+			.kindle-template-preview-error p {
+				margin: 0 0 10px 0;
+				font-size: 0.9em;
+			}
+			.kindle-template-error-details {
+				background-color: var(--background-secondary);
+				padding: 8px;
+				border-radius: 4px;
+				font-size: 0.8em;
+				margin: 0;
+				overflow-x: auto;
 			}
 			.kindle-template-variables-column {
 				max-height: 450px; 
@@ -282,8 +369,9 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 				overflow-x: auto; 
 				border-top: 1px solid var(--background-modifier-border); 
 				padding-top: 15px; 
-				padding-right: 10px; /* Added right padding */
-				margin-top: 20px; 
+				padding-right: 10px;
+				margin-top: 20px;
+				grid-column: 1 / -1;
 			}
 			.kindle-template-editor-textarea {
 				width: 100%;
@@ -398,6 +486,50 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+	}
+
+	private createSampleTemplateData() {
+		return {
+			book: {
+				id: "B001234567",
+				title: "サンプル書籍タイトル",
+				author: "サンプル著者",
+				asin: "B001234567",
+				url: "https://amazon.com/dp/B001234567",
+				imageUrl: "https://m.media-amazon.com/images/I/sample.jpg",
+				lastAnnotatedDate: new Date("2024-01-15"),
+				metadata: {}
+			},
+			highlights: `### チャプター1: はじめに
+
+> これは最初のハイライトです。重要なポイントを示しています。
+**Location:** 123-125
+
+**Note:** これは重要な概念です。
+
+---
+
+> 二番目のハイライトには、さらに詳細な説明が含まれています。
+**Location:** 456-460
+
+---
+
+> 最後のハイライトは結論部分からのものです。
+**Location:** 789-792
+
+**Note:** まとめとして、この章では基本概念を学びました。`,
+			title: "サンプル書籍タイトル",
+			author: "サンプル著者",
+			authorUrl: "https://amazon.com/author/sample",
+			imageUrl: "https://m.media-amazon.com/images/I/sample.jpg",
+			highlightsCount: 3,
+			lastAnnotatedDate: "2024年1月15日",
+			publicationDate: "2023年12月1日",
+			publisher: "サンプル出版社",
+			url: "https://amazon.com/dp/B001234567",
+			appLink: "kindle://book?action=open&asin=B001234567",
+			asin: "B001234567"
+		};
 	}
 
 	private addCodeExampleHelper(

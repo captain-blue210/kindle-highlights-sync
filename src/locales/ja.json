@@ -39,6 +39,12 @@
 			"title": "ノートテンプレート",
 			"description": "以下でテンプレートを編集します（Nunjucks構文を使用）。詳細はNunjucksのドキュメントを参照してください。変数をクリックするとテンプレートに挿入されます。",
 			"resetButton": "デフォルトに戻す",
+			"preview": {
+				"title": "プレビュー",
+				"description": "サンプルデータを使用したテンプレートのライブプレビュー",
+				"errorTitle": "テンプレートエラー",
+				"errorDescription": "プレビューを表示するには、テンプレート構文を修正してください"
+			},
 			"variables": {
 				"title": "利用可能な変数",
 				"headerVariable": "変数",
