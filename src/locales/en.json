@@ -39,6 +39,10 @@
 			"title": "Note Template",
 			"description": "Edit your template below (uses Nunjucks syntax). See Nunjucks documentation for details. Click on a variable to insert it into the template.",
 			"resetButton": "Reset to Default",
+			"preview": {
+				"title": "Preview",
+				"error": "Template Error: {{error}}"
+			},
 			"variables": {
 				"title": "Available Variables",
 				"headerVariable": "Variable",

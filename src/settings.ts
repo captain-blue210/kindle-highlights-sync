@@ -2,6 +2,7 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian"; // Modal を削除
 import { t } from "./i18n"; // Import t function
 import KindleHighlightsPlugin from "./main";
+import { renderTemplate } from "./services/template-renderer";
 
 // Define supported Amazon regions (keys will be used for translation keys)
 const AMAZON_REGION_KEYS: string[] = [
@@ -113,31 +114,75 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			cls: "kindle-template-editor-layout",
 		});
 
-		const editorColumn = templateEditorLayout.createDiv({
+		// Create editor and preview grid
+		const editorPreviewGrid = templateEditorLayout.createDiv({
+			cls: "kindle-editor-preview-grid",
+		});
+
+		// Editor column
+		const editorColumn = editorPreviewGrid.createDiv({
 			cls: "kindle-template-editor-column",
+		});
+
+		editorColumn.createEl("h4", {
+			text: t("settings.noteTemplate.title"),
+			cls: "kindle-column-header",
 		});
 
 		const templateTextarea = editorColumn.createEl("textarea", {
 			cls: "kindle-template-editor-textarea",
 		});
 		templateTextarea.value = this.plugin.settings.templateContent;
-		templateTextarea.addEventListener("input", async (e) => {
-			this.plugin.settings.templateContent = (
-				e.target as HTMLTextAreaElement
-			).value;
-			await this.plugin.saveSettings();
-		});
 
 		const resetButton = editorColumn.createEl("button", {
 			text: t("settings.noteTemplate.resetButton"),
 			cls: "kindle-template-editor-button",
 		});
+
+		// Preview column
+		const previewColumn = editorPreviewGrid.createDiv({
+			cls: "kindle-template-preview-column",
+		});
+
+		previewColumn.createEl("h4", {
+			text: t("settings.noteTemplate.preview.title"),
+			cls: "kindle-column-header",
+		});
+
+		const previewContent = previewColumn.createDiv({
+			cls: "kindle-template-preview-content",
+		});
+
+		// Function to update preview
+		const updatePreview = () => {
+			try {
+				const sampleData = this.generateSampleData();
+				const rendered = renderTemplate(templateTextarea.value, sampleData);
+				previewContent.innerHTML = this.convertMarkdownToHTML(rendered);
+			} catch (error) {
+				previewContent.innerHTML = `<div class="kindle-preview-error">${t("settings.noteTemplate.preview.error", { error: error.message })}</div>`;
+			}
+		};
+
+		// Event listeners
+		templateTextarea.addEventListener("input", async (e) => {
+			this.plugin.settings.templateContent = (
+				e.target as HTMLTextAreaElement
+			).value;
+			await this.plugin.saveSettings();
+			updatePreview();
+		});
+
 		resetButton.addEventListener("click", async () => {
 			templateTextarea.value = DEFAULT_SETTINGS.templateContent;
 			this.plugin.settings.templateContent =
 				DEFAULT_SETTINGS.templateContent;
 			await this.plugin.saveSettings();
+			updatePreview();
 		});
+
+		// Initial preview update
+		updatePreview();
 
 		const variablesColumn = templateEditorLayout.createDiv({
 			cls: "kindle-template-variables-column",
@@ -237,6 +282,7 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 						cursorPos + varToInsert.length;
 				templateTextarea.focus();
 				templateTextarea.dispatchEvent(new Event("input"));
+				updatePreview();
 			});
 			row.createEl("td", { text: t(variable.descriptionKey) });
 		});
@@ -271,10 +317,27 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			.kindle-template-editor-layout {
 				margin-top: 10px;
 			}
+			.kindle-editor-preview-grid {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 20px;
+				margin-bottom: 25px;
+			}
 			.kindle-template-editor-column {
 				display: flex;
 				flex-direction: column;
-				margin-bottom: 25px; 
+			}
+			.kindle-template-preview-column {
+				display: flex;
+				flex-direction: column;
+			}
+			.kindle-column-header {
+				margin: 0 0 10px 0;
+				font-size: 1em;
+				font-weight: 600;
+				color: var(--text-normal);
+				border-bottom: 1px solid var(--background-modifier-border);
+				padding-bottom: 5px;
 			}
 			.kindle-template-variables-column {
 				max-height: 450px; 
@@ -282,7 +345,7 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 				overflow-x: auto; 
 				border-top: 1px solid var(--background-modifier-border); 
 				padding-top: 15px; 
-				padding-right: 10px; /* Added right padding */
+				padding-right: 10px;
 				margin-top: 20px; 
 			}
 			.kindle-template-editor-textarea {
@@ -297,6 +360,71 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 				color: var(--text-normal);
 				resize: vertical;
 				margin-bottom: 10px;
+			}
+			.kindle-template-preview-content {
+				width: 100%;
+				height: 300px;
+				padding: 15px;
+				border: 1px solid var(--background-modifier-border);
+				border-radius: 4px;
+				background-color: var(--background-primary);
+				color: var(--text-normal);
+				overflow-y: auto;
+				font-family: var(--font-text);
+				line-height: 1.6;
+			}
+			.kindle-template-preview-content h1 {
+				font-size: 1.8em;
+				font-weight: 600;
+				margin: 0.5em 0;
+				color: var(--text-normal);
+			}
+			.kindle-template-preview-content h2 {
+				font-size: 1.5em;
+				font-weight: 600;
+				margin: 0.4em 0;
+				color: var(--text-normal);
+			}
+			.kindle-template-preview-content h3 {
+				font-size: 1.3em;
+				font-weight: 600;
+				margin: 0.3em 0;
+				color: var(--text-normal);
+			}
+			.kindle-template-preview-content blockquote {
+				border-left: 4px solid var(--text-accent);
+				margin: 1em 0;
+				padding: 0.5em 1em;
+				background-color: var(--background-secondary);
+				font-style: italic;
+			}
+			.kindle-template-preview-content ul {
+				margin: 0.5em 0;
+				padding-left: 1.5em;
+			}
+			.kindle-template-preview-content li {
+				margin: 0.2em 0;
+			}
+			.kindle-template-preview-content a {
+				color: var(--text-accent);
+				text-decoration: none;
+			}
+			.kindle-template-preview-content a:hover {
+				text-decoration: underline;
+			}
+			.kindle-template-preview-content strong {
+				font-weight: 600;
+			}
+			.kindle-template-preview-content em {
+				font-style: italic;
+			}
+			.kindle-preview-error {
+				color: var(--text-error);
+				background-color: var(--background-modifier-error);
+				padding: 10px;
+				border-radius: 4px;
+				border: 1px solid var(--text-error);
+				font-family: monospace;
 			}
 			.kindle-template-editor-button {
 				padding: 8px 15px;
@@ -409,5 +537,66 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 		exampleDiv.createEl("h4", { text: title }); // Use the passed (translated) title
 		const pre = exampleDiv.createEl("pre");
 		pre.createEl("code", { text: code });
+	}
+
+	private generateSampleData(): any {
+		return {
+			title: "コンテナ物語―世界を変えたモノの箱の歴史",
+			author: "マルク・レビンソン",
+			authorUrl: "https://www.amazon.co.jp/author/marc-levinson",
+			imageUrl: "https://example.com/book-cover.jpg",
+			highlightsCount: 15,
+			lastAnnotatedDate: "2024-12-20",
+			publicationDate: "2007-05-25",
+			publisher: "日経BP社",
+			url: "https://www.amazon.co.jp/dp/B00B3GDRM8",
+			appLink: "kindle://book?action=open&asin=B00B3GDRM8",
+			asin: "B00B3GDRM8",
+			highlights: `### 位置 123-125
+コンテナは単なる箱ではない。それは世界経済の動脈である。
+
+### 位置 456-458
+標準化がもたらした革命は、運送業界だけでなく、製造業、小売業、そして私たちの日常生活にまで及んでいる。
+
+### 位置 789-791
+> 効率性の追求が、時として人間的な要素を置き去りにしてしまうのは皮肉なことである。
+
+**メモ:** この観点は現代のデジタル化にも当てはまる重要な指摘だと思う。`,
+		};
+	}
+
+	private convertMarkdownToHTML(markdown: string): string {
+		// Simple markdown to HTML conversion for preview
+		// This is a basic implementation - in a real app you might use a proper markdown parser
+		let html = markdown;
+		
+		// Headers
+		html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+		html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+		html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+		
+		// Bold
+		html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+		
+		// Italic
+		html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+		
+		// Links
+		html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+		
+		// Blockquotes
+		html = html.replace(/^> (.*$)/gim, '<blockquote>$1</blockquote>');
+		
+		// Lists
+		html = html.replace(/^- (.*$)/gim, '<li>$1</li>');
+		html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+		
+		// Line breaks
+		html = html.replace(/\n/g, '<br>');
+		
+		// Images
+		html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto;">');
+		
+		return html;
 	}
 }
