@@ -484,7 +484,7 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 		document.head.appendChild(styleEl);
 
 		new Setting(containerEl)
-			.setName("Amazon Region")
+			.setName(t("settings.amazonRegion.name"))
 			.setDesc(t("settings.amazonRegion.description"))
 			.addDropdown((dropdown) => {
 				for (const key of AMAZON_REGION_KEYS) {
