@@ -22,9 +22,11 @@ export async function loadTranslations(locale?: string): Promise<void> {
 
 	try {
 		const module = await locales[currentLocale]();
-		translations = module.default;
+		translations = module.default || module;
 		console.log(
-			`Kindle Highlights: Loaded translations for ${currentLocale}`
+			`Kindle Highlights: Loaded translations for ${currentLocale}:`,
+			Object.keys(translations).length,
+			"keys"
 		);
 	} catch (e) {
 		console.error(
