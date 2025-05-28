@@ -114,42 +114,34 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			cls: "kindle-template-editor-layout",
 		});
 
-		// Create editor and preview grid
-		const editorPreviewGrid = templateEditorLayout.createDiv({
-			cls: "kindle-editor-preview-grid",
+		// Create editor container (vertical layout)
+		const editorContainer = templateEditorLayout.createDiv({
+			cls: "kindle-template-editor-container",
 		});
 
-		// Editor column
-		const editorColumn = editorPreviewGrid.createDiv({
-			cls: "kindle-template-editor-column",
-		});
-
-		editorColumn.createEl("h4", {
+		// Template editor section
+		editorContainer.createEl("h4", {
 			text: t("settings.noteTemplate.title"),
 			cls: "kindle-column-header",
 		});
 
-		const templateTextarea = editorColumn.createEl("textarea", {
+		const templateTextarea = editorContainer.createEl("textarea", {
 			cls: "kindle-template-editor-textarea",
 		});
 		templateTextarea.value = this.plugin.settings.templateContent;
 
-		const resetButton = editorColumn.createEl("button", {
+		const resetButton = editorContainer.createEl("button", {
 			text: t("settings.noteTemplate.resetButton"),
 			cls: "kindle-template-editor-button",
 		});
 
-		// Preview column
-		const previewColumn = editorPreviewGrid.createDiv({
-			cls: "kindle-template-preview-column",
-		});
-
-		previewColumn.createEl("h4", {
+		// Preview section (below reset button)
+		editorContainer.createEl("h4", {
 			text: t("settings.noteTemplate.preview.title"),
-			cls: "kindle-column-header",
+			cls: "kindle-column-header kindle-preview-header",
 		});
 
-		const previewContent = previewColumn.createDiv({
+		const previewContent = editorContainer.createDiv({
 			cls: "kindle-template-preview-content",
 		});
 
@@ -317,19 +309,10 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			.kindle-template-editor-layout {
 				margin-top: 10px;
 			}
-			.kindle-editor-preview-grid {
-				display: grid;
-				grid-template-columns: 1fr 1fr;
-				gap: 20px;
+			.kindle-template-editor-container {
+				display: flex;
+				flex-direction: column;
 				margin-bottom: 25px;
-			}
-			.kindle-template-editor-column {
-				display: flex;
-				flex-direction: column;
-			}
-			.kindle-template-preview-column {
-				display: flex;
-				flex-direction: column;
 			}
 			.kindle-column-header {
 				margin: 0 0 10px 0;
@@ -338,6 +321,9 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 				color: var(--text-normal);
 				border-bottom: 1px solid var(--background-modifier-border);
 				padding-bottom: 5px;
+			}
+			.kindle-preview-header {
+				margin-top: 20px;
 			}
 			.kindle-template-variables-column {
 				max-height: 450px; 
