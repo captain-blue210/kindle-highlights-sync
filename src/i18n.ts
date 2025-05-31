@@ -20,12 +20,6 @@ export async function loadTranslations(locale?: string): Promise<void> {
 	const momentLocale = moment.locale();
 	const targetLocale = locale || momentLocale;
 
-	console.log(`Kindle Highlights: loadTranslations called with:`);
-	console.log(`  - provided locale: ${locale}`);
-	console.log(`  - moment.locale(): ${momentLocale}`);
-	console.log(`  - targetLocale: ${targetLocale}`);
-	console.log(`  - available locales:`, Object.keys(locales));
-
 	currentLocale = locales[targetLocale] ? targetLocale : "en"; // Fallback to 'en'
 	console.log(`Kindle Highlights: Selected currentLocale: ${currentLocale}`);
 
@@ -34,9 +28,11 @@ export async function loadTranslations(locale?: string): Promise<void> {
 			`Kindle Highlights: Attempting to load translations for ${currentLocale}`
 		);
 		const module = await locales[currentLocale]();
-		translations = module.default;
+		translations = module.default || module;
 		console.log(
-			`Kindle Highlights: Successfully loaded translations for ${currentLocale}`
+			`Kindle Highlights: Loaded translations for ${currentLocale}:`,
+			Object.keys(translations).length,
+			"keys"
 		);
 		console.log(
 			`Kindle Highlights: Loaded translations object:`,

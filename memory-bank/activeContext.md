@@ -37,6 +37,14 @@
     *   `KindleApiService` の `fetchHighlights` と `_scrapePaginatedHighlightsForBook` メソッドを修正し、データ取得中の詳細な進捗イベント (`fetch:start`, `fetch:booklist:start`, `fetch:booklist:end`, `fetch:page:start`, `fetch:highlights:start`, `fetch:highlights:progress`, `fetch:highlights:end`, `fetch:page:end`, `fetch:end`, `fetch:error` など) を発行するようにした。
     *   `main.ts` の `syncHighlights` と `saveHighlightsAsNotes` メソッドを修正し、ノート生成中の進捗イベント (`start`, `book:start`, `progress`, `book:end`, `end`, `error`) を発行するようにした。
     *   ビルドエラー (`setIcon` の引数間違い) をデバッグし修正した。
+*   **Amazon Regionプルダウンの翻訳問題修正 (2025-05-31):**
+    *   **問題:** 設定画面で一部のAmazon Region項目が翻訳キー（例：`settings.amazonRegion.regions.co.jp`）のまま表示される問題を修正。
+    *   **原因:** 設定画面の `display()` メソッドが非同期ではないため、翻訳が完全に読み込まれる前にプルダウンが描画されていた。
+    *   **修正内容:**
+        *   `src/settings.ts` の `display()` メソッドを非同期化（`async display(): Promise<void>`）。
+        *   メソッド開始時に `await loadTranslations()` を追加し、翻訳が確実に読み込まれてからUI描画を開始するよう修正。
+        *   Amazon Regionプルダウン生成部分にデバッグログを追加し、翻訳状況を確認できるようにした。
+    *   **結果:** すべてのAmazon Region項目が正しく日本語で表示されるようになった。
 
 ## 3. 現在の決定事項・考慮事項
 
