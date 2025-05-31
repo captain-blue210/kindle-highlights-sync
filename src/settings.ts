@@ -1,6 +1,6 @@
 // settings.ts
 import { App, Notice, PluginSettingTab, Setting } from "obsidian"; // Modal を削除
-import { t } from "./i18n"; // Import t function
+import { getCurrentLocale, getTranslations, loadTranslations, t } from "./i18n"; // Import loadTranslations and t function
 import KindleHighlightsPlugin from "./main";
 import { renderTemplate } from "./services/template-renderer";
 
@@ -80,7 +80,13 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display(): void {
+	async display(): Promise<void> {
+		// 翻訳が確実に読み込まれるまで待機
+		await loadTranslations();
+		console.log(
+			"Kindle Highlights: Settings display - translations loaded"
+		);
+
 		const { containerEl } = this;
 		containerEl.empty();
 
@@ -149,10 +155,16 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 		const updatePreview = () => {
 			try {
 				const sampleData = this.generateSampleData();
-				const rendered = renderTemplate(templateTextarea.value, sampleData);
+				const rendered = renderTemplate(
+					templateTextarea.value,
+					sampleData
+				);
 				previewContent.innerHTML = this.convertMarkdownToHTML(rendered);
 			} catch (error) {
-				previewContent.innerHTML = `<div class="kindle-preview-error">${t("settings.noteTemplate.preview.error", { error: error.message })}</div>`;
+				previewContent.innerHTML = `<div class="kindle-preview-error">${t(
+					"settings.noteTemplate.preview.error",
+					{ error: error.message }
+				)}</div>`;
 			}
 		};
 
@@ -473,12 +485,34 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			.setName(t("settings.amazonRegion.name"))
 			.setDesc(t("settings.amazonRegion.description"))
 			.addDropdown((dropdown) => {
+				console.log(
+					"Kindle Highlights: Setting up Amazon Region dropdown"
+				);
+				console.log(
+					"Kindle Highlights: Current translations object:",
+					getTranslations()
+				);
+				console.log(
+					"Kindle Highlights: Current locale:",
+					getCurrentLocale()
+				);
+
 				for (const key of AMAZON_REGION_KEYS) {
 					// Iterate over keys
-					dropdown.addOption(
-						key,
-						t(`settings.amazonRegion.regions.${key}`)
-					); // Use translated region name
+					const translationKey = `settings.amazonRegion.regions.${key}`;
+					const translatedValue = t(translationKey);
+					console.log(
+						`Kindle Highlights: Region ${key} -> Translation key: ${translationKey} -> Value: ${translatedValue}`
+					);
+
+					// Check if translation was successful
+					if (translatedValue === translationKey) {
+						console.warn(
+							`Kindle Highlights: Translation failed for key: ${translationKey}`
+						);
+					}
+
+					dropdown.addOption(key, translatedValue); // Use translated region name
 				}
 				dropdown
 					.setValue(this.plugin.settings.amazonRegion)
@@ -555,34 +589,37 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 		// Simple markdown to HTML conversion for preview
 		// This is a basic implementation - in a real app you might use a proper markdown parser
 		let html = markdown;
-		
+
 		// Headers
-		html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
-		html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
-		html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
-		
+		html = html.replace(/^### (.*$)/gim, "<h3>$1</h3>");
+		html = html.replace(/^## (.*$)/gim, "<h2>$1</h2>");
+		html = html.replace(/^# (.*$)/gim, "<h1>$1</h1>");
+
 		// Bold
-		html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-		
+		html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+
 		// Italic
-		html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-		
+		html = html.replace(/\*(.*?)\*/g, "<em>$1</em>");
+
 		// Links
 		html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
-		
+
 		// Blockquotes
-		html = html.replace(/^> (.*$)/gim, '<blockquote>$1</blockquote>');
-		
+		html = html.replace(/^> (.*$)/gim, "<blockquote>$1</blockquote>");
+
 		// Lists
-		html = html.replace(/^- (.*$)/gim, '<li>$1</li>');
-		html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
-		
+		html = html.replace(/^- (.*$)/gim, "<li>$1</li>");
+		html = html.replace(/(<li>.*<\/li>)/s, "<ul>$1</ul>");
+
 		// Line breaks
-		html = html.replace(/\n/g, '<br>');
-		
+		html = html.replace(/\n/g, "<br>");
+
 		// Images
-		html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto;">');
-		
+		html = html.replace(
+			/!\[([^\]]*)\]\(([^)]+)\)/g,
+			'<img src="$2" alt="$1" style="max-width: 100%; height: auto;">'
+		);
+
 		return html;
 	}
 }
