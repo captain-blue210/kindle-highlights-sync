@@ -69,6 +69,11 @@ export async function saveBookNotes(
 			result.errors.push(`${path}: unreadable note`);
 		}
 	}
+	// Missing an identity scan could create a duplicate of a renamed unreadable note.
+	if (result.errors.length) {
+		result.failed = Math.max(books.length, result.errors.length);
+		return result;
+	}
 	for (const [index, book] of books.entries()) {
 		onBook?.(book, index);
 		const bookHighlights = highlights.filter((h) => h.bookId === book.id);

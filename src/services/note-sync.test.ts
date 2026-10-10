@@ -139,3 +139,24 @@ describe("append-only Kindle sync", () => {
 		).toBe("2025-09-21");
 	});
 });
+
+it("matches hadynz plain text highlights without anchors by text and location", () => {
+	const body =
+		"abc — Location: [10](kindle://book?action=open&asin=ABC&location=10)\n";
+	const result = mergeHighlights(
+		body,
+		[{ id: "remote", bookId: "ABC", text: "abc", location: "10" }],
+		"ABC",
+	);
+	expect(result.added).toBe(0);
+	expect(result.body).toBe(body);
+	expect(result.warnings).toEqual([]);
+	const edited = body.replace("abc", "edited");
+	expect(
+		mergeHighlights(
+			edited,
+			[{ id: "remote", bookId: "ABC", text: "abc", location: "10" }],
+			"ABC",
+		).warnings.length,
+	).toBeGreaterThan(0);
+});

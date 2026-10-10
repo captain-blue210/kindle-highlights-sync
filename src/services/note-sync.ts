@@ -92,6 +92,24 @@ export function mergeHighlights(
 		);
 		unanchored.push({ text, location });
 	}
+	// hadynz's default template renders plain paragraphs with an inline location link.
+	for (const block of visible.split(/\n\s*\n|\n---+\s*\n/)) {
+		if (/^\s*>/m.test(block) || /\^ref-\d+(?=\s|$)/.test(block)) continue;
+		const link = /kindle:\/\/book\?[^\s)]+/.exec(block);
+		if (!link) continue;
+		try {
+			const url = new URL(link[0]);
+			if (url.searchParams.get("asin") !== asin) continue;
+			const location = url.searchParams.get("location") ?? undefined;
+			if (!location) continue;
+			const text = normalize(
+				block
+					.slice(0, link.index)
+					.replace(/\s*(?:[—–-]\s*[^:\n]+:\s*)?\[[^\]\n]*\]\($/, ""),
+			);
+			unanchored.push({ text, location });
+		} catch {}
+	}
 	// Unknown old quote blocks cannot be distinguished from edited or handwritten highlights.
 	if (unanchored.some((h) => !h.location))
 		warnings.push("Unanchored quote has no location; note left unchanged");

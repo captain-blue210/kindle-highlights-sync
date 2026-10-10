@@ -303,6 +303,9 @@ export function updateBookProperties(
 		...book,
 		bookId: existing?.bookId ?? book.bookId,
 	};
+	for (const field of ["title", "author", "asin", "bookImageUrl"] as const) {
+		if (!empty(existing?.[field])) values[field] = existing![field];
+	}
 	for (const field of PROPERTY_FIELDS) {
 		const value = values[field];
 		if (empty(value)) continue;

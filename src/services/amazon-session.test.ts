@@ -446,3 +446,25 @@ describe("Amazon session authentication", () => {
 		expect(s.windows[0].destroyed).toBe(true);
 	});
 });
+
+it("blocks cross-region and external HTTP redirects in the isolated login window", async () => {
+	const s = setup(record());
+	await s.controller.ensureAuthenticated("co.jp");
+	for (const url of [
+		"https://www.amazon.com/ap/signin",
+		"https://example.com/signin",
+		"http://www.amazon.co.jp/ap/signin",
+	]) {
+		const event = { preventDefault: vi.fn() };
+		s.windows[0].webContents.emit("will-redirect", event, url);
+		expect(event.preventDefault).toHaveBeenCalled();
+	}
+	const allowed = { preventDefault: vi.fn() };
+	s.windows[0].webContents.emit(
+		"will-redirect",
+		allowed,
+		"https://www.amazon.co.jp/ap/signin",
+	);
+	expect(allowed.preventDefault).not.toHaveBeenCalled();
+	s.controller.dispose();
+});

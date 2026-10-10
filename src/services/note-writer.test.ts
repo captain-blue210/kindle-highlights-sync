@@ -77,3 +77,14 @@ describe("persisting Kindle note updates", () => {
 		expect(io.files.get("books/B.md")).toBe(source);
 	});
 });
+
+it("blocks writes if an existing note cannot be read for identity matching", async () => {
+	const io = memoryVault({ "books/Handwritten name.md": "existing" });
+	io.read = async () => {
+		throw Error("unreadable");
+	};
+	const result = await saveBookNotes(io, config, [book], [highlight]);
+	expect(result.failed).toBeGreaterThan(0);
+	expect(result.created).toBe(0);
+	expect(io.files.size).toBe(1);
+});

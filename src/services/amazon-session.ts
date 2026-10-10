@@ -361,21 +361,23 @@ export function createAmazonSessionController(
 					action: "deny",
 				}));
 				// Restrict navigation to this region's Amazon hosts, never external login pages.
-				state.window.webContents.on(
-					"will-navigate",
-					(event: { preventDefault(): void }, url: string) => {
-						try {
-							const parsed = new URL(url);
-							if (
-								parsed.protocol !== "https:" ||
-								!approvedCookieDomain(parsed.hostname, region)
-							)
-								event.preventDefault();
-						} catch {
+				const guardNavigation = (
+					event: { preventDefault(): void },
+					url: string,
+				) => {
+					try {
+						const parsed = new URL(url);
+						if (
+							parsed.protocol !== "https:" ||
+							!approvedCookieDomain(parsed.hostname, region)
+						)
 							event.preventDefault();
-						}
-					},
-				);
+					} catch {
+						event.preventDefault();
+					}
+				};
+				state.window.webContents.on("will-navigate", guardNavigation);
+				state.window.webContents.on("will-redirect", guardNavigation);
 			}
 			const window = state.window;
 			const urls = adapters.urlsForRegion(region)!;

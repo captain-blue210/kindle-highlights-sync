@@ -119,3 +119,35 @@ describe("Kindle property migration", () => {
 		expect(splitNote(result).body).toBe(splitNote(legacy).body);
 	});
 });
+
+it("preserves curated descriptive fields when renamed properties are initialized by sync before migration", () => {
+	const source =
+		"---\nbookId: old\ntitle: Curated title\nauthor: Curated author\nASIN: ABC\nimage: curated.jpg\n---\nMy memo\n";
+	const next = {
+		...names,
+		title: "書名",
+		author: "著者",
+		bookImageUrl: "表紙",
+	};
+	const synced = updateBookProperties(
+		source,
+		{
+			bookId: "remote",
+			title: "Remote title",
+			author: "Remote author",
+			asin: "ABC",
+			bookImageUrl: "remote.jpg",
+			highlightsCount: 0,
+		},
+		next,
+		[names],
+	);
+	const migrated = migrateProperties(synced, next, [names]);
+	expect(data(migrated.content)).toMatchObject({
+		書名: "Curated title",
+		著者: "Curated author",
+		表紙: "curated.jpg",
+		bookId: "old",
+	});
+	expect(splitNote(migrated.content).body).toBe(splitNote(source).body);
+});
