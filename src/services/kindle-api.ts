@@ -1,5 +1,5 @@
 import { EventEmitter } from "events"; // ★ Import EventEmitter
-import moment from "moment"; // Revert to default import
+import { parseAmazonDate } from "./amazon-date";
 import { App, Notice } from "obsidian"; // Keep App, Notice
 import { AmazonLoginModal } from "../modals/AmazonLoginModal"; // Import the modal
 import { Book, Highlight } from "../models";
@@ -119,34 +119,7 @@ export const parseAuthor = (
 };
 
 // Helper function to parse date string (adapted from example with region handling)
-export const parseToDateString = (
-	kindleDate: string | undefined,
-	region: string
-): Date | null => {
-	if (!kindleDate) return null;
-
-	let date: moment.Moment;
-
-	switch (region) {
-		case "co.jp": {
-			// Example: "2025年3月29日 土曜日"
-			// Extract the date part before the day name
-			const datePart = kindleDate.substring(0, kindleDate.indexOf(" "));
-			// Use Japanese format (Year, Month, Day with Kanji)
-			date = moment(datePart, "YYYY年M月D日", "ja", true); // Use 'ja' locale and strict parsing
-			break;
-		}
-		// TODO: Add cases for other regions with specific formats (e.g., 'fr') if needed
-		default: {
-			// Default to English formats (handle full and abbreviated months)
-			// Example: "October 24, 2021" or "Mar 29, 2025"
-			date = moment(kindleDate, ["MMMM D, YYYY", "MMM DD, YYYY"], true); // Strict parsing
-			break;
-		}
-	}
-
-	return date.isValid() ? date.toDate() : null;
-};
+export const parseToDateString = parseAmazonDate;
 
 // --- Constants --- (Keep outside class)
 const USER_AGENT =
@@ -239,8 +212,8 @@ export class KindleApiService {
 	): string {
 		// Use notebookUrl from the provided regionUrls
 		return `${regionUrls.notebookUrl}?asin=${book.asin}&contentLimitState=${
-			state?.contentLimitState ?? ""
-		}&token=${state?.token ?? ""}`;
+			encodeURIComponent(state?.contentLimitState ?? "")
+		}&token=${encodeURIComponent(state?.token ?? "")}`;
 	}
 
 	// Updated _parseNextPageState to use CheerioAPI type
@@ -249,7 +222,7 @@ export class KindleApiService {
 			PAGINATION_LIMIT_STATE_SELECTOR
 		).val() as string;
 		const token = $(PAGINATION_TOKEN_SELECTOR).val() as string;
-		return token && contentLimitState ? { contentLimitState, token } : null;
+		return token ? { contentLimitState: contentLimitState ?? "", token } : null;
 	}
 
 	// _parseHighlightsOnPage and _loadAndScrapeHighlightsPage removed.
@@ -267,6 +240,7 @@ export class KindleApiService {
 			regionUrls,
 			book
 		);
+		const visitedUrls = new Set<string>();
 		let totalHighlightsForBook = 0; // Keep track of total highlights for this book
 
 		console.log(
@@ -281,6 +255,8 @@ export class KindleApiService {
 					url: nextPageUrl,
 				}); // ★ Emit page start
 
+				if (visitedUrls.has(nextPageUrl)) throw new Error("Repeated pagination token");
+				visitedUrls.add(nextPageUrl);
 				// Check for valid login window before loading
 				if (!this.loginWindow || this.loginWindow.isDestroyed()) {
 					throw new Error(
@@ -289,14 +265,16 @@ export class KindleApiService {
 				}
 
 				// Load the current page's DOM
-				const { dom: $ } = await loadRemoteDom(
+				const { dom: $, finalUrl } = await loadRemoteDom(
 					nextPageUrl,
 					USER_AGENT,
 					5000, // Keep timeout
 					this.loginWindow // Reuse existing window
 				);
 
-				// Parse highlights using the existing page parser
+				const pageUrl = new URL(finalUrl);
+    if (pageUrl.protocol !== 'https:' || pageUrl.hostname !== new URL(regionUrls.notebookUrl).hostname || pageUrl.pathname !== '/notebook' || !$('#kp-notebook-annotations').length || $('form[action*="signin"], #ap_signin_form, #auth-captcha-image').length) throw new Error("Amazon session expired or highlight page unavailable");
+    // Parse highlights using the existing page parser
 				const highlightsOnPage = this.parser.parseHighlightsPage(
 					$,
 					book.asin
@@ -464,7 +442,9 @@ export class KindleApiService {
 				`KindleApiService: Successfully loaded notebook DOM from ${finalUrl}`
 			);
 
-			// 2. Parse Books using HighlightParser
+			const notebookAddress = new URL(finalUrl);
+   if (notebookAddress.protocol !== 'https:' || notebookAddress.hostname !== new URL(regionUrls.notebookUrl).hostname || notebookAddress.pathname !== '/notebook' || !notebookDom('#kp-notebook-library').length || notebookDom('form[action*="signin"], #ap_signin_form, #auth-captcha-image').length) throw new Error("Amazon session expired or notebook unavailable");
+   // 2. Parse Books using HighlightParser
 			console.log(
 				"KindleApiService: Parsing books using HighlightParser..."
 			);
@@ -486,15 +466,7 @@ export class KindleApiService {
 				return { books: [], highlights: [] }; // Return early
 			}
 
-			// --- TEMPORARY: Limit books for testing ---
-			let limitedBooks = books; // Create a new variable for the potentially sliced array
-			if (limitedBooks.length > 10) {
-				console.log(
-					`KindleApiService: Limiting books to 10 for testing (original count: ${limitedBooks.length}).`
-				);
-				limitedBooks = limitedBooks.slice(0, 10);
-			}
-			// --- End Temporary ---
+			const successfulBooks: Book[] = [];
 
 			// 3. Scrape Highlights for each parsed book (Paginated)
 			console.log(
@@ -503,7 +475,7 @@ export class KindleApiService {
 			const allHighlights: Highlight[] = []; // Define allHighlights here - Use const
 
 			// Use the limited list for scraping
-			for (const book of limitedBooks) {
+			for (const book of books) {
 				try {
 					// ★ Pass emitter down
 					const bookHighlights =
@@ -513,6 +485,7 @@ export class KindleApiService {
 							emitter // ★ Pass emitter
 						);
 					allHighlights.push(...bookHighlights);
+					successfulBooks.push(book);
 				} catch (error) {
 					console.error(
 						`KindleApiService: Failed to scrape highlights for book ${book.title} (ASIN: ${book.asin}):`,
@@ -531,12 +504,12 @@ export class KindleApiService {
 			}
 
 			console.log(
-				`KindleApiService: Fetch complete. Total books processed: ${limitedBooks.length}, Total highlights: ${allHighlights.length}`
+				`KindleApiService: Fetch complete. Total books processed: ${successfulBooks.length}, Total highlights: ${allHighlights.length}`
 			);
 			emitter.emit("fetch:end"); // Emit fetch end
 
 			// Return the original full book list but only highlights for the processed (limited) books
-			return { books: books, highlights: allHighlights }; // Return original 'books' list
+			return { books: successfulBooks, highlights: allHighlights }; // Return original 'books' list
 		} catch (error) {
 			console.error(
 				"KindleApiService: Error fetching highlights:",

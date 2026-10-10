@@ -1,3 +1,4 @@
+import type * as cheerio from "cheerio";
 import type { Book, Highlight } from "../models";
 import { parseAuthor, parseToDateString } from "./kindle-api"; // Import helpers from kindle-api
 
@@ -67,10 +68,8 @@ export class HighlightParser {
 			}
 			const author = parseAuthor(authorText); // Use imported helper
 			const imageUrl = bookElement.find(BOOK_IMAGE_SELECTOR).attr("src");
-			const lastAnnotatedText = bookElement
-				.find(BOOK_LAST_ANNOTATED_SELECTOR)
-				.text()
-				?.trim();
+			const dateElement = bookElement.find(BOOK_LAST_ANNOTATED_SELECTOR);
+			const lastAnnotatedText = (dateElement.val() as string | undefined) || dateElement.text()?.trim();
 			const lastAnnotatedDate = parseToDateString(
 				lastAnnotatedText,
 				region
