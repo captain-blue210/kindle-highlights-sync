@@ -1,7 +1,7 @@
 import { EventEmitter } from "events"; // ★ Import EventEmitter
-import moment from "moment"; // Revert to default import
+import { parseAmazonDate } from "./amazon-date";
 import { App, Notice } from "obsidian"; // Keep App, Notice
-import { AmazonLoginModal } from "../modals/AmazonLoginModal"; // Import the modal
+import { createAmazonSession, AmazonSessionController } from "./amazon-session";
 import { Book, Highlight } from "../models";
 import { loadRemoteDom } from "../utils/remote-loader";
 import { HighlightParser } from "./highlight-parser"; // Import the new parser
@@ -109,7 +109,7 @@ export function getRegionUrls(region: string): AmazonRegionUrls | undefined {
 
 // Helper function to parse author string (from example)
 export const parseAuthor = (
-	scrapedAuthor: string | undefined
+	scrapedAuthor: string | undefined,
 ): string | undefined => {
 	// Example format: "著者: Author Name" or "By: Author Name"
 	// Removes prefix like "著者: " or "By: "
@@ -119,34 +119,7 @@ export const parseAuthor = (
 };
 
 // Helper function to parse date string (adapted from example with region handling)
-export const parseToDateString = (
-	kindleDate: string | undefined,
-	region: string
-): Date | null => {
-	if (!kindleDate) return null;
-
-	let date: moment.Moment;
-
-	switch (region) {
-		case "co.jp": {
-			// Example: "2025年3月29日 土曜日"
-			// Extract the date part before the day name
-			const datePart = kindleDate.substring(0, kindleDate.indexOf(" "));
-			// Use Japanese format (Year, Month, Day with Kanji)
-			date = moment(datePart, "YYYY年M月D日", "ja", true); // Use 'ja' locale and strict parsing
-			break;
-		}
-		// TODO: Add cases for other regions with specific formats (e.g., 'fr') if needed
-		default: {
-			// Default to English formats (handle full and abbreviated months)
-			// Example: "October 24, 2021" or "Mar 29, 2025"
-			date = moment(kindleDate, ["MMMM D, YYYY", "MMM DD, YYYY"], true); // Strict parsing
-			break;
-		}
-	}
-
-	return date.isValid() ? date.toDate() : null;
-};
+export const parseToDateString = parseAmazonDate;
 
 // --- Constants --- (Keep outside class)
 const USER_AGENT =
@@ -166,68 +139,39 @@ type NextPageState = {
 import type { BrowserWindow } from "electron"; // Import BrowserWindow type
 
 export class KindleApiService {
-	private loggedIn = false; // Type inferred from literal
-	private app: App; // Store App instance
-	private loginWindow: BrowserWindow | null = null; // Store reference to the login window
-
-	private parser: HighlightParser;
-
-	constructor(app: App) {
-		this.app = app;
-		this.parser = new HighlightParser();
+	private loggedIn = false;
+	private loginWindow: BrowserWindow | null = null;
+	private sessionController: AmazonSessionController | undefined;
+	private parser = new HighlightParser();
+	constructor(
+		private app: App,
+		private secretRefs: Record<string, string> = {},
+		private saveRefs: () => Promise<void> = async () => {},
+	) {}
+	private sessions() {
+		return (this.sessionController ??= createAmazonSession(
+			this.app,
+			getRegionUrls,
+			this.secretRefs,
+			this.saveRefs,
+		));
 	}
-
 	public isLoggedIn(): boolean {
 		return this.loggedIn;
 	}
-
-	/**
-	 * Initiates the login process using the AmazonLoginModal.
-	 * @param region The Amazon region code (e.g., 'com', 'co.jp').
-	 * @returns True if login was successful, false otherwise.
-	 */
-	// Return type remains boolean for external callers, but internally handles the window
 	public async login(region: string): Promise<boolean> {
-		console.log("KindleApiService: Initiating login...");
-		// Clean up any previous login window first
-		this.cleanupLoginWindow();
-
-		const loginModal = new AmazonLoginModal(region);
-		// Destructure the result from doLogin
-		const { success, window } = await loginModal.doLogin();
-
-		if (success && window) {
-			this.loggedIn = true;
-			this.loginWindow = window; // Store the window reference
-			console.log("KindleApiService: Login successful, window stored.");
-		} else {
-			this.loggedIn = false;
-			this.loginWindow = null; // Ensure window reference is cleared on failure
-			console.log("KindleApiService: Login cancelled or failed.");
-			// Ensure the window is cleaned up if login failed but window was somehow returned
-			if (window && !window.isDestroyed()) {
-				window.destroy();
-			}
-		}
-		return success; // Return only the success status
-	}
-
-	// Helper method to clean up the login window
-	private cleanupLoginWindow(): void {
-		if (this.loginWindow && !this.loginWindow.isDestroyed()) {
-			try {
-				this.loginWindow.destroy();
-				console.log(
-					"KindleApiService: Previous login window destroyed."
-				);
-			} catch (e) {
-				console.error(
-					"KindleApiService: Error destroying previous login window:",
-					e
-				);
-			}
-		}
+		this.loggedIn = false;
 		this.loginWindow = null;
+		this.loginWindow = await this.sessions().ensureAuthenticated(region);
+		return (this.loggedIn = this.loginWindow !== null);
+	}
+	public async persist(region: string): Promise<void> {
+		await this.sessions().persist(region);
+	}
+	public dispose(): void {
+		this.loggedIn = false;
+		this.loginWindow = null;
+		this.sessionController?.dispose();
 	}
 
 	// --- Private Helper Methods for Highlight Scraping ---
@@ -235,21 +179,23 @@ export class KindleApiService {
 	private _buildHighlightsUrl(
 		regionUrls: AmazonRegionUrls,
 		book: Book,
-		state?: NextPageState
+		state?: NextPageState,
 	): string {
 		// Use notebookUrl from the provided regionUrls
-		return `${regionUrls.notebookUrl}?asin=${book.asin}&contentLimitState=${
-			state?.contentLimitState ?? ""
-		}&token=${state?.token ?? ""}`;
+		return `${regionUrls.notebookUrl}?asin=${book.asin}&contentLimitState=${encodeURIComponent(
+			state?.contentLimitState ?? "",
+		)}&token=${encodeURIComponent(state?.token ?? "")}`;
 	}
 
 	// Updated _parseNextPageState to use CheerioAPI type
 	private _parseNextPageState($: cheerio.CheerioAPI): NextPageState | null {
 		const contentLimitState = $(
-			PAGINATION_LIMIT_STATE_SELECTOR
+			PAGINATION_LIMIT_STATE_SELECTOR,
 		).val() as string;
 		const token = $(PAGINATION_TOKEN_SELECTOR).val() as string;
-		return token && contentLimitState ? { contentLimitState, token } : null;
+		return token
+			? { contentLimitState: contentLimitState ?? "", token }
+			: null;
 	}
 
 	// _parseHighlightsOnPage and _loadAndScrapeHighlightsPage removed.
@@ -258,51 +204,75 @@ export class KindleApiService {
 	private async _scrapePaginatedHighlightsForBook(
 		book: Book,
 		regionUrls: AmazonRegionUrls,
-		emitter: EventEmitter // ★ Add emitter
+		emitter: EventEmitter, // ★ Add emitter
 	): Promise<Highlight[]> {
 		emitter.emit("fetch:highlights:start", { bookTitle: book.title }); // ★ Emit highlight fetch start for book
 		const allHighlights: Highlight[] = []; // Use const
 		let hasNextPage = true;
 		let nextPageUrl: string | null = this._buildHighlightsUrl(
 			regionUrls,
-			book
+			book,
 		);
+		const visitedUrls = new Set<string>();
 		let totalHighlightsForBook = 0; // Keep track of total highlights for this book
 
 		console.log(
-			`KindleApiService: Scraping highlights for book: ${book.title} (ASIN: ${book.asin})`
+			`KindleApiService: Scraping highlights for book: ${book.title} (ASIN: ${book.asin})`,
 		);
 
 		while (hasNextPage && nextPageUrl) {
 			try {
-				console.log(` - Loading highlights page: ${nextPageUrl}`);
 				emitter.emit("fetch:page:start", {
 					bookTitle: book.title,
-					url: nextPageUrl,
+					url: regionUrls.notebookUrl,
 				}); // ★ Emit page start
 
+				if (visitedUrls.has(nextPageUrl))
+					throw new Error("Repeated pagination token");
+				visitedUrls.add(nextPageUrl);
 				// Check for valid login window before loading
 				if (!this.loginWindow || this.loginWindow.isDestroyed()) {
 					throw new Error(
-						"Kindle session window is not available for loading highlights page. Please log in again."
+						"Kindle session window is not available for loading highlights page. Please log in again.",
 					);
 				}
 
 				// Load the current page's DOM
-				const { dom: $ } = await loadRemoteDom(
+				const { dom: $, finalUrl } = await loadRemoteDom(
 					nextPageUrl,
 					USER_AGENT,
 					5000, // Keep timeout
-					this.loginWindow // Reuse existing window
+					this.loginWindow, // Reuse existing window
 				);
 
+				const pageUrl = new URL(finalUrl);
+				if (
+					pageUrl.protocol !== "https:" ||
+					pageUrl.hostname !==
+						new URL(regionUrls.notebookUrl).hostname ||
+					pageUrl.pathname !== "/notebook" ||
+					pageUrl.searchParams.get("asin") !== book.asin ||
+					!(
+						$("#kp-notebook-annotations").length ||
+						// Amazon returns annotation fragments, including empty final pages.
+						($("input.kp-notebook-content-limit-state").length &&
+							$("input.kp-notebook-annotations-next-page-start")
+								.length)
+					) ||
+					$(
+						'form[name="signIn"], form[action*="signin"], #ap_signin_form, #ap_password, #auth-captcha-image, #captchacharacters, #auth-mfa-otpcode',
+					).length
+				)
+					throw new Error(
+						"Amazon session expired or highlight page unavailable",
+					);
 				// Parse highlights using the existing page parser
 				const highlightsOnPage = this.parser.parseHighlightsPage(
 					$,
-					book.asin
+					book.asin,
 				);
 				console.log(
-					`   - Parsed ${highlightsOnPage.length} highlights from page.`
+					`   - Parsed ${highlightsOnPage.length} highlights from page.`,
 				);
 				allHighlights.push(...highlightsOnPage);
 				totalHighlightsForBook += highlightsOnPage.length;
@@ -321,7 +291,7 @@ export class KindleApiService {
 				emitter.emit("fetch:page:end", {
 					// ★ Emit page end
 					bookTitle: book.title,
-					url: nextPageUrl,
+					url: regionUrls.notebookUrl,
 					highlightsFound: highlightsOnPage.length,
 				});
 
@@ -334,33 +304,32 @@ export class KindleApiService {
 					? this._buildHighlightsUrl(
 							regionUrls,
 							book,
-							nextPageState ?? undefined
-					  ) // Pass undefined if null - Corrected indentation
+							nextPageState ?? undefined,
+						) // Pass undefined if null - Corrected indentation
 					: null;
 
 				// Small delay to avoid overwhelming the server? Optional.
 				// await new Promise(resolve => setTimeout(resolve, 200));
 			} catch (pageError) {
 				console.error(
-					`KindleApiService: Error scraping page ${nextPageUrl} for book ${book.asin}:`,
-					pageError
+					`KindleApiService: Highlight page unavailable for book ${book.asin}`,
 				);
 				emitter.emit("fetch:page:error", {
 					bookTitle: book.title,
-					url: nextPageUrl,
-					error: pageError.message,
+					url: regionUrls.notebookUrl,
+					error: "Highlight page unavailable",
 				}); // ★ Emit page error
 				// Decide if we should stop for this book or try to continue? Stop for now.
 				hasNextPage = false;
 				// Optionally re-throw or handle differently
 				throw new Error(
-					`Failed to scrape highlights page for book ${book.title}: ${pageError.message}`
+					`Failed to scrape highlights for book ${book.title}`,
 				);
 			}
 		}
 
 		console.log(
-			`KindleApiService: Finished scraping for book ${book.asin}. Total highlights: ${allHighlights.length}`
+			`KindleApiService: Finished scraping for book ${book.asin}. Total highlights: ${allHighlights.length}`,
 		);
 		emitter.emit("fetch:highlights:end", {
 			bookTitle: book.title,
@@ -369,48 +338,10 @@ export class KindleApiService {
 		return allHighlights;
 	}
 
-	/**
-	 * Logs the user out by resetting the internal state.
-	 * TODO: Implement actual session clearing (e.g., cookie removal).
-	 */
 	public async logout(region: string): Promise<void> {
-		// Added region parameter
-		console.log("KindleApiService: Logging out...");
 		this.loggedIn = false;
-
-		// Attempt to clear session via hidden iframe (best effort)
-		const regionUrls = getRegionUrls(region);
-		if (regionUrls?.logoutUrl) {
-			console.log(
-				`Attempting logout via iframe navigation to: ${regionUrls.logoutUrl}`
-			);
-			try {
-				const iframe = document.createElement("iframe");
-				iframe.style.display = "none"; // Keep it hidden
-				iframe.src = regionUrls.logoutUrl;
-				document.body.appendChild(iframe);
-
-				// Wait a short period for the navigation to potentially clear cookies
-				await new Promise((resolve) => setTimeout(resolve, 1500)); // Wait 1.5 seconds
-
-				// Clean up the iframe
-				document.body.removeChild(iframe);
-				console.log(
-					"Logout iframe navigation attempted and iframe removed."
-				);
-			} catch (error) {
-				console.error("Error during iframe logout attempt:", error);
-				// Ignore errors here, as it's a best-effort attempt
-			}
-		} else {
-			console.warn(
-				`Logout URL not found for region: ${region}. Skipping iframe logout attempt.`
-			);
-		}
-
-		new Notice(
-			"Logged out from Kindle session (internal state cleared). Session clearing via Amazon is best-effort."
-		);
+		this.loginWindow = null;
+		await this.sessions().logout(region);
 	}
 
 	/**
@@ -421,8 +352,12 @@ export class KindleApiService {
 	 */
 	public async fetchHighlights(
 		region: string,
-		emitter: EventEmitter // Add emitter parameter
-	): Promise<{ books: Book[]; highlights: Highlight[] }> {
+		emitter: EventEmitter, // Add emitter parameter
+	): Promise<{
+		books: Book[];
+		highlights: Highlight[];
+		failedBooks: number;
+	}> {
 		if (!this.loggedIn) {
 			const errorMsg = "Not logged in to Amazon Kindle.";
 			console.error(`KindleApiService: ${errorMsg}`);
@@ -441,32 +376,44 @@ export class KindleApiService {
 		}
 		const notebookUrl = regionUrls.notebookUrl;
 		console.log(
-			`KindleApiService: Scraping Kindle notebook: ${notebookUrl}`
+			`KindleApiService: Scraping Kindle notebook: ${notebookUrl}`,
 		);
 
 		try {
 			// 1. Load the main notebook page DOM
 			console.log(
-				`KindleApiService: Loading notebook page: ${regionUrls.notebookUrl}`
+				`KindleApiService: Loading notebook page: ${regionUrls.notebookUrl}`,
 			);
 			if (!this.loginWindow || this.loginWindow.isDestroyed()) {
 				throw new Error(
-					"Kindle session window is not available. Please log in again."
+					"Kindle session window is not available. Please log in again.",
 				);
 			}
 			const { dom: notebookDom, finalUrl } = await loadRemoteDom(
 				regionUrls.notebookUrl,
 				USER_AGENT,
 				5000, // Keep timeout
-				this.loginWindow // Reuse existing window
+				this.loginWindow, // Reuse existing window
 			);
-			console.log(
-				`KindleApiService: Successfully loaded notebook DOM from ${finalUrl}`
-			);
+			console.log("KindleApiService: Notebook loaded");
 
+			const notebookAddress = new URL(finalUrl);
+			if (
+				notebookAddress.protocol !== "https:" ||
+				notebookAddress.hostname !==
+					new URL(regionUrls.notebookUrl).hostname ||
+				notebookAddress.pathname !== "/notebook" ||
+				!notebookDom("#kp-notebook-library").length ||
+				notebookDom(
+					'form[action*="signin"], #ap_signin_form, #auth-captcha-image',
+				).length
+			)
+				throw new Error(
+					"Amazon session expired or notebook unavailable",
+				);
 			// 2. Parse Books using HighlightParser
 			console.log(
-				"KindleApiService: Parsing books using HighlightParser..."
+				"KindleApiService: Parsing books using HighlightParser...",
 			);
 			emitter.emit("fetch:booklist:start"); // Indicate book list parsing start
 
@@ -480,43 +427,36 @@ export class KindleApiService {
 			console.log(`KindleApiService: Parsed ${books.length} books.`);
 			if (books.length === 0) {
 				console.warn(
-					"KindleApiService: No books parsed from the notebook page."
+					"KindleApiService: No books parsed from the notebook page.",
 				);
 				emitter.emit("fetch:end"); // Emit fetch end early
-				return { books: [], highlights: [] }; // Return early
+				return { books: [], highlights: [], failedBooks: 0 }; // Return early
 			}
 
-			// --- TEMPORARY: Limit books for testing ---
-			let limitedBooks = books; // Create a new variable for the potentially sliced array
-			if (limitedBooks.length > 10) {
-				console.log(
-					`KindleApiService: Limiting books to 10 for testing (original count: ${limitedBooks.length}).`
-				);
-				limitedBooks = limitedBooks.slice(0, 10);
-			}
-			// --- End Temporary ---
+			const successfulBooks: Book[] = [];
 
 			// 3. Scrape Highlights for each parsed book (Paginated)
 			console.log(
-				"KindleApiService: Starting paginated highlight scraping..."
+				"KindleApiService: Starting paginated highlight scraping...",
 			);
 			const allHighlights: Highlight[] = []; // Define allHighlights here - Use const
 
 			// Use the limited list for scraping
-			for (const book of limitedBooks) {
+			for (const book of books) {
 				try {
 					// ★ Pass emitter down
 					const bookHighlights =
 						await this._scrapePaginatedHighlightsForBook(
 							book,
 							regionUrls,
-							emitter // ★ Pass emitter
+							emitter, // ★ Pass emitter
 						);
 					allHighlights.push(...bookHighlights);
+					successfulBooks.push(book);
 				} catch (error) {
 					console.error(
 						`KindleApiService: Failed to scrape highlights for book ${book.title} (ASIN: ${book.asin}):`,
-						error
+						error,
 					);
 					// Optionally emit a specific book error event
 					emitter.emit("fetch:book:error", {
@@ -524,23 +464,27 @@ export class KindleApiService {
 						error: error.message,
 					});
 					new Notice(
-						`Failed to fetch highlights for "${book.title}". Check console for details.`
+						`Failed to fetch highlights for "${book.title}". Check console for details.`,
 					);
 					// Continue to next book even if one fails
 				}
 			}
 
 			console.log(
-				`KindleApiService: Fetch complete. Total books processed: ${limitedBooks.length}, Total highlights: ${allHighlights.length}`
+				`KindleApiService: Fetch complete. Total books processed: ${successfulBooks.length}, Total highlights: ${allHighlights.length}`,
 			);
 			emitter.emit("fetch:end"); // Emit fetch end
 
 			// Return the original full book list but only highlights for the processed (limited) books
-			return { books: books, highlights: allHighlights }; // Return original 'books' list
+			return {
+				books: successfulBooks,
+				highlights: allHighlights,
+				failedBooks: books.length - successfulBooks.length,
+			}; // Return original 'books' list
 		} catch (error) {
 			console.error(
 				"KindleApiService: Error fetching highlights:",
-				error
+				error,
 			);
 			emitter.emit("fetch:error", error.message || "Unknown fetch error"); // Emit fetch error
 			// Don't automatically log out on fetch errors, could be temporary

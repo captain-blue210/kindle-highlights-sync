@@ -1,119 +1,156 @@
 {
-	"commands": {
-		"syncKindleHighlights": {
-			"name": "Kindleハイライトを同期"
-		},
-		"logoutKindle": {
-			"name": "Kindleからログアウト"
-		}
-	},
-	"ribbon": {
-		"syncKindleHighlights": {
-			"tooltip": "Kindleハイライトを同期"
-		}
-	},
-	"sync": {
-		"starting": "Kindleハイライトの同期を開始しています...",
-		"sessionNotFound": "Amazonセッションが見つかりません。ログインしてください。",
-		"loginCancelledOrFailed": "Kindleへのログインがキャンセルされたか失敗しました。",
-		"loginRequired": "ハイライトを同期するにはログインが必要です。",
-		"fetchingHighlights": "ハイライトを取得しています...",
-		"foundBooksAndHighlights": "{{bookCount}}冊の本と{{highlightCount}}件のハイライトが見つかりました。",
-		"completed": "Kindleハイライトの同期が完了しました。{{bookCount}}冊の本と{{highlightCount}}件のハイライトをインポートしました。",
-		"error": "Kindleハイライトの同期中にエラーが発生しました: {{errorMessage}}",
-		"templateError": "「{{bookTitle}}」のテンプレート処理中にエラーが発生しました: {{errorMessage}}。この本をスキップします。",
-		"unknownError": "不明なエラー",
-		"fileProcessingError": "ファイル処理エラー: {{filePath}}。ファイルオブジェクトが見つかりません。"
-	},
-	"noteOutput": {
-		"locationLabel": "位置",
-		"noteLabel": "メモ"
-	},
-	"settings": {
-		"outputDirectory": {
-			"name": "出力ディレクトリ",
-			"description": "ハイライトを保存するディレクトリ",
-			"placeholder": "Kindle Highlights"
-		},
-		"noteTemplate": {
-			"title": "ノートテンプレート",
-			"description": "以下でテンプレートを編集します（Nunjucks構文を使用）。詳細はNunjucksのドキュメントを参照してください。変数をクリックするとテンプレートに挿入されます。",
-			"resetButton": "デフォルトに戻す",
-			"preview": {
-				"title": "プレビュー",
-				"error": "テンプレートエラー: {{error}}"
-			},
-			"variables": {
-				"title": "利用可能な変数",
-				"headerVariable": "変数",
-				"headerDescription": "説明",
-				"bookTitle": "本のタイトル",
-				"bookAuthor": "著者",
-				"authorUrl": "著者ページのURL（利用可能な場合）",
-				"imageUrl": "表紙画像のURL",
-				"highlightsCount": "ハイライト数",
-				"lastAnnotatedDate": "最終ハイライト日",
-				"publicationDate": "出版日",
-				"publisher": "出版社",
-				"amazonUrl": "Amazonの書籍URL",
-				"kindleAppLink": "Kindleアプリのディープリンク",
-				"asin": "Amazon標準識別番号（ASIN）",
-				"preRenderedHighlights": "整形済みのハイライト一覧"
-			},
-			"syntaxExamples": {
-				"title": "使用例",
-				"conditional": {
-					"title": "条件分岐"
-				},
-				"fallback": {
-					"title": "フォールバック値"
-				}
-			}
-		},
-		"amazonRegion": {
-			"name": "Amazonリージョン",
-			"description": "お使いのAmazon Kindleのリージョンを選択してください",
-			"invalidRegionError": "無効なAmazonリージョンが選択されました: {{value}}。デフォルトに戻します。",
-			"regions": {
-				"com": "アメリカ (.com)",
-				"co.jp": "日本 (.co.jp)",
-				"co.uk": "イギリス (.co.uk)",
-				"de": "ドイツ (.de)",
-				"fr": "フランス (.fr)",
-				"es": "スペイン (.es)",
-				"it": "イタリア (.it)",
-				"ca": "カナダ (.ca)",
-				"com.au": "オーストラリア (.com.au)",
-				"com.br": "ブラジル (.com.br)",
-				"com.mx": "メキシコ (.com.mx)",
-				"in": "インド (.in)"
-			}
-		},
-		"downloadMetadata": {
-			"name": "メタデータをダウンロード",
-			"description": "書籍のメタデータ（表紙、出版日など）をダウンロードします"
-		}
-	},
-	"modals": {
-		"amazonLogin": {
-			"windowTitle": "Amazon ({{region}}) ログイン - Kindle Highlights Sync",
-			"errors": {
-				"cannotInitiate": "エラー: ログインを開始できません。無効なAmazonリージョン設定またはElectronコンポーネントが利用できません。"
-			},
-			"success": "Amazonへのログインに成功しました！"
-		},
-		"amazonLogout": {
-			"title": "Amazonログアウト確認",
-			"confirmationText": "Obsidian内のAmazon Kindleセッションからログアウトしてもよろしいですか？",
-			"noteText": "注意: これによりセッションのクリアを試みます。次回、再度ログインが必要になる場合があります。",
-			"buttons": {
-				"logout": "ログアウト",
-				"cancel": "キャンセル"
-			},
-			"loggingOut": "ログアウトしています...",
-			"errors": {
-				"logoutFailed": "ログアウトに失敗しました: {{errorMessage}}"
-			}
-		}
-	}
+  "commands": {
+    "syncKindleHighlights": {
+      "name": "Kindleハイライトを同期"
+    },
+    "logoutKindle": {
+      "name": "Kindleからログアウト"
+    }
+  },
+  "ribbon": {
+    "syncKindleHighlights": {
+      "tooltip": "Kindleハイライトを同期"
+    }
+  },
+  "sync": {
+    "starting": "Kindleハイライトの同期を開始しています...",
+    "sessionNotFound": "Amazonセッションが見つかりません。ログインしてください。",
+    "loginCancelledOrFailed": "Kindleへのログインがキャンセルされたか失敗しました。",
+    "loginRequired": "ハイライトを同期するにはログインが必要です。",
+    "fetchingHighlights": "ハイライトを取得しています...",
+    "foundBooksAndHighlights": "{{bookCount}}冊の本と{{highlightCount}}件のハイライトが見つかりました。",
+    "completed": "Kindleハイライトの同期が完了しました。{{bookCount}}冊の本と{{highlightCount}}件のハイライトをインポートしました。",
+    "error": "Kindleハイライトの同期中にエラーが発生しました: {{errorMessage}}",
+    "templateError": "「{{bookTitle}}」のテンプレート処理中にエラーが発生しました: {{errorMessage}}。この本をスキップします。",
+    "unknownError": "不明なエラー",
+    "fileProcessingError": "ファイル処理エラー: {{filePath}}。ファイルオブジェクトが見つかりません。",
+    "busy": "別のKindle処理が実行中です。",
+    "partial": "同期で失敗 {{failed}} 件、確認が必要なノート {{held}} 件がありました。",
+    "summary": "同期完了: 新規 {{created}} 件、更新 {{updated}} 件、追加ハイライト {{added}} 件。",
+    "safeFailure": "同期を完了できませんでした。認証・取得に失敗した書籍のノートは変更していません。"
+  },
+  "noteOutput": {
+    "locationLabel": "位置",
+    "noteLabel": "メモ"
+  },
+  "settings": {
+    "outputDirectory": {
+      "name": "出力ディレクトリ",
+      "description": "ハイライトを保存するディレクトリ",
+      "placeholder": "Kindle Highlights"
+    },
+    "noteTemplate": {
+      "title": "ノートテンプレート",
+      "description": "以下でテンプレートを編集します（Nunjucks構文を使用）。詳細はNunjucksのドキュメントを参照してください。変数をクリックするとテンプレートに挿入されます。",
+      "resetButton": "デフォルトに戻す",
+      "preview": {
+        "title": "プレビュー",
+        "error": "テンプレートエラー: {{error}}"
+      },
+      "variables": {
+        "title": "利用可能な変数",
+        "headerVariable": "変数",
+        "headerDescription": "説明",
+        "bookTitle": "本のタイトル",
+        "bookAuthor": "著者",
+        "authorUrl": "著者ページのURL（利用可能な場合）",
+        "imageUrl": "表紙画像のURL",
+        "highlightsCount": "ハイライト数",
+        "lastAnnotatedDate": "最終ハイライト日",
+        "publicationDate": "出版日",
+        "publisher": "出版社",
+        "amazonUrl": "Amazonの書籍URL",
+        "kindleAppLink": "Kindleアプリのディープリンク",
+        "asin": "Amazon標準識別番号（ASIN）",
+        "preRenderedHighlights": "整形済みのハイライト一覧"
+      },
+      "syntaxExamples": {
+        "title": "使用例",
+        "conditional": {
+          "title": "条件分岐"
+        },
+        "fallback": {
+          "title": "フォールバック値"
+        }
+      }
+    },
+    "amazonRegion": {
+      "name": "Amazonリージョン",
+      "description": "お使いのAmazon Kindleのリージョンを選択してください",
+      "invalidRegionError": "無効なAmazonリージョンが選択されました: {{value}}。デフォルトに戻します。",
+      "regions": {
+        "com": "アメリカ (.com)",
+        "co.jp": "日本 (.co.jp)",
+        "co.uk": "イギリス (.co.uk)",
+        "de": "ドイツ (.de)",
+        "fr": "フランス (.fr)",
+        "es": "スペイン (.es)",
+        "it": "イタリア (.it)",
+        "ca": "カナダ (.ca)",
+        "com.au": "オーストラリア (.com.au)",
+        "com.br": "ブラジル (.com.br)",
+        "com.mx": "メキシコ (.com.mx)",
+        "in": "インド (.in)"
+      }
+    },
+    "downloadMetadata": {
+      "name": "メタデータをダウンロード",
+      "description": "書籍のメタデータ（表紙、出版日など）をダウンロードします"
+    }
+  },
+  "modals": {
+    "amazonLogin": {
+      "windowTitle": "Amazon ({{region}}) ログイン - Kindle Highlights Sync",
+      "errors": {
+        "cannotInitiate": "エラー: ログインを開始できません。無効なAmazonリージョン設定またはElectronコンポーネントが利用できません。"
+      },
+      "success": "Amazonへのログインに成功しました！"
+    },
+    "amazonLogout": {
+      "title": "Amazonログアウト確認",
+      "confirmationText": "Obsidian内のAmazon Kindleセッションからログアウトしてもよろしいですか？",
+      "noteText": "このVault・リージョンの保存済みCookieと実行中セッションを消去します。",
+      "buttons": {
+        "logout": "ログアウト",
+        "cancel": "キャンセル"
+      },
+      "loggingOut": "ログアウトしています...",
+      "errors": {
+        "logoutFailed": "ログアウトに失敗しました: {{errorMessage}}"
+      }
+    }
+  },
+  "migration": {
+    "title": "Kindleプロパティを一括変換",
+    "properties": "Kindleプロパティ名",
+    "saveNames": "プロパティ名を保存",
+    "namesSaved": "プロパティ名を保存しました。",
+    "invalidNames": "プロパティ名が空欄・重複・予約名、または別項目の旧名称と重なっています。同期中は変更できません。",
+    "historyDescription": "以前の名前も移行元として認識します。保存後、一括変換で既存ノートを更新できます。",
+    "description": "既存値を優先し、空欄だけ補完します。本文を保持し、対象ノートをバックアップしてから旧プロパティを削除します。",
+    "preview": "変換をプレビュー",
+    "previewSummary": "変更 {{changed}} 件、スキップ {{skipped}} 件、不正・読込失敗 {{failed}} 件。",
+    "conflict": "{{field}}: 保持する値 {{kept}} / 旧形式の値 {{source}}",
+    "apply": "バックアップして変換",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "failed": "変換を完了できませんでした。バックアップの確認後、プレビューから再実行してください。",
+    "result": "変換 {{migrated}} 件、スキップ {{skipped}} 件、値の相違 {{conflicts}} 件、失敗 {{failed}} 件。",
+    "backup": "バックアップ: {{directory}}",
+    "fields": {
+      "bookId": "書籍ID",
+      "title": "書名",
+      "author": "著者",
+      "highlightsCount": "ハイライト数",
+      "asin": "ASIN",
+      "lastAnnotatedDate": "最終ハイライト日",
+      "bookImageUrl": "表紙画像"
+    }
+  },
+  "auth": {
+    "title": "Amazonセッション",
+    "description": "セッションCookieをObsidianキーチェーンに保存します。メールアドレス・パスワードは保存しません。",
+    "login": "ログイン・接続確認",
+    "failed": "Amazonに接続できませんでした。ノートは変更されていません。"
+  }
 }

@@ -6,3 +6,6 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+
+.kindle-migration-preview { max-height: 55vh; overflow: auto; }
+.kindle-migration-preview pre { white-space: pre-wrap; }

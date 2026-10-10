@@ -1,12 +1,10 @@
 import { App, Modal, Notice } from "obsidian";
 import { t } from "../i18n"; // Import t function
-import { KindleApiService } from "../services/kindle-api";
 
 export class AmazonLogoutModal extends Modal {
 	constructor(
 		app: App,
-		private kindleApiService: KindleApiService,
-		private region: string // Add region parameter
+		private logout: () => Promise<void>,
 	) {
 		super(app);
 	}
@@ -38,14 +36,13 @@ export class AmazonLogoutModal extends Modal {
 			new Notice(t("modals.amazonLogout.loggingOut"));
 			this.close(); // Close modal first
 			try {
-				await this.kindleApiService.logout(this.region); // Pass region to logout method
+				await this.logout(); // Pass region to logout method
 				// Notice for successful logout should be handled by the service or here if needed
 			} catch (error) {
-				console.error("Error during logout:", error);
 				new Notice(
 					t("modals.amazonLogout.errors.logoutFailed", {
-						errorMessage: error.message,
-					})
+						errorMessage: "Session could not be cleared",
+					}),
 				);
 			}
 		};

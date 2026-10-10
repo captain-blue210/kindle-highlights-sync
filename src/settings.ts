@@ -2,6 +2,11 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian"; // Modal を削除
 import { getCurrentLocale, getTranslations, loadTranslations, t } from "./i18n"; // Import loadTranslations and t function
 import KindleHighlightsPlugin from "./main";
+import {
+	DEFAULT_PROPERTY_NAMES,
+	PROPERTY_FIELDS,
+	PropertyNames,
+} from "./services/note-properties";
 import { renderTemplate } from "./services/template-renderer";
 
 // Define supported Amazon regions (keys will be used for translation keys)
@@ -25,6 +30,9 @@ export interface KindleHighlightsSettings {
 	templateContent: string;
 	amazonRegion: string;
 	downloadMetadata: boolean;
+	propertyNames: PropertyNames;
+	propertyNameHistory: PropertyNames[];
+	amazonSessionSecrets: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: KindleHighlightsSettings = {
@@ -70,6 +78,9 @@ updated:
 `,
 	amazonRegion: "com",
 	downloadMetadata: true,
+	propertyNames: { ...DEFAULT_PROPERTY_NAMES },
+	propertyNameHistory: [],
+	amazonSessionSecrets: {},
 };
 
 export class KindleHighlightsSettingTab extends PluginSettingTab {
@@ -84,7 +95,7 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 		// 翻訳が確実に読み込まれるまで待機
 		await loadTranslations();
 		console.log(
-			"Kindle Highlights: Settings display - translations loaded"
+			"Kindle Highlights: Settings display - translations loaded",
 		);
 
 		const { containerEl } = this;
@@ -101,7 +112,49 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.outputDirectory = value;
 						await this.plugin.saveSettings();
-					})
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(t("auth.title"))
+			.setDesc(t("auth.description"))
+			.addButton((button) =>
+				button
+					.setButtonText(t("auth.login"))
+					.onClick(() => this.plugin.loginAmazon()),
+			);
+		containerEl.createEl("h3", { text: t("migration.properties") });
+		const draft = { ...this.plugin.settings.propertyNames };
+		for (const field of PROPERTY_FIELDS)
+			new Setting(containerEl)
+				.setName(t(`migration.fields.${field}`))
+				.addText((text) =>
+					text.setValue(draft[field]).onChange((value) => {
+						draft[field] = value;
+					}),
+				);
+		new Setting(containerEl)
+			.setName(t("migration.saveNames"))
+			.setDesc(t("migration.historyDescription"))
+			.addButton((button) =>
+				button
+					.setButtonText(t("migration.saveNames"))
+					.onClick(async () => {
+						try {
+							await this.plugin.changePropertyNames(draft);
+							new Notice(t("migration.namesSaved"));
+						} catch {
+							new Notice(t("migration.invalidNames"));
+						}
+					}),
+			);
+		new Setting(containerEl)
+			.setName(t("migration.title"))
+			.setDesc(t("migration.description"))
+			.addButton((button) =>
+				button
+					.setButtonText(t("migration.preview"))
+					.onClick(() => this.plugin.showPropertyMigration()),
 			);
 
 		// 2. テンプレート設定
@@ -157,13 +210,13 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 				const sampleData = this.generateSampleData();
 				const rendered = renderTemplate(
 					templateTextarea.value,
-					sampleData
+					sampleData,
 				);
 				previewContent.innerHTML = this.convertMarkdownToHTML(rendered);
 			} catch (error) {
 				previewContent.innerHTML = `<div class="kindle-preview-error">${t(
 					"settings.noteTemplate.preview.error",
-					{ error: error.message }
+					{ error: error.message },
 				)}</div>`;
 			}
 		};
@@ -302,13 +355,13 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			t("settings.noteTemplate.syntaxExamples.conditional.title"),
 			`{% if author %}
 - Author: {{ author }}
-{% endif %}`
+{% endif %}`,
 		);
 		this.addCodeExampleHelper(
 			examplesContainer,
 			t("settings.noteTemplate.syntaxExamples.fallback.title"),
 			`{{ title or 'Untitled Book' }}
-{{ author or 'Unknown Author' }}`
+{{ author or 'Unknown Author' }}`,
 		);
 
 		const styleEl = document.createElement("style");
@@ -486,15 +539,15 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 			.setDesc(t("settings.amazonRegion.description"))
 			.addDropdown((dropdown) => {
 				console.log(
-					"Kindle Highlights: Setting up Amazon Region dropdown"
+					"Kindle Highlights: Setting up Amazon Region dropdown",
 				);
 				console.log(
 					"Kindle Highlights: Current translations object:",
-					getTranslations()
+					getTranslations(),
 				);
 				console.log(
 					"Kindle Highlights: Current locale:",
-					getCurrentLocale()
+					getCurrentLocale(),
 				);
 
 				for (const key of AMAZON_REGION_KEYS) {
@@ -502,13 +555,13 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 					const translationKey = `settings.amazonRegion.regions.${key}`;
 					const translatedValue = t(translationKey);
 					console.log(
-						`Kindle Highlights: Region ${key} -> Translation key: ${translationKey} -> Value: ${translatedValue}`
+						`Kindle Highlights: Region ${key} -> Translation key: ${translationKey} -> Value: ${translatedValue}`,
 					);
 
 					// Check if translation was successful
 					if (translatedValue === translationKey) {
 						console.warn(
-							`Kindle Highlights: Translation failed for key: ${translationKey}`
+							`Kindle Highlights: Translation failed for key: ${translationKey}`,
 						);
 					}
 
@@ -525,7 +578,7 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 							new Notice(
 								t("settings.amazonRegion.invalidRegionError", {
 									value: value,
-								})
+								}),
 							);
 							this.plugin.settings.amazonRegion =
 								DEFAULT_SETTINGS.amazonRegion;
@@ -544,14 +597,14 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.downloadMetadata = value;
 						await this.plugin.saveSettings();
-					})
+					}),
 			);
 	}
 
 	private addCodeExampleHelper(
 		container: HTMLElement,
 		title: string, // Title for example is already translated before calling
-		code: string
+		code: string,
 	): void {
 		const exampleDiv = container.createEl("div");
 		exampleDiv.createEl("h4", { text: title }); // Use the passed (translated) title
@@ -617,7 +670,7 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 		// Images
 		html = html.replace(
 			/!\[([^\]]*)\]\(([^)]+)\)/g,
-			'<img src="$2" alt="$1" style="max-width: 100%; height: auto;">'
+			'<img src="$2" alt="$1" style="max-width: 100%; height: auto;">',
 		);
 
 		return html;
