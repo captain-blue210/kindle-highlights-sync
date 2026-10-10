@@ -84,6 +84,7 @@ interface RegionState {
 	restored: boolean;
 	authenticated: boolean;
 	pending?: Promise<BrowserWindow | null>;
+	cancelPending?: () => void;
 }
 
 export function createAmazonSessionController(
@@ -132,6 +133,8 @@ export function createAmazonSessionController(
 		return state;
 	}
 	function destroy(state: RegionState) {
+		state.cancelPending?.();
+		state.cancelPending = undefined;
 		state.authenticated = false;
 		if (state.window && !state.window.isDestroyed()) state.window.destroy();
 		state.window = null;
@@ -184,6 +187,7 @@ export function createAmazonSessionController(
 	function loadNotebook(
 		window: BrowserWindow,
 		url: string,
+		state: RegionState,
 	): Promise<boolean | null> {
 		return new Promise((resolve, reject) => {
 			let settled = false;
@@ -191,6 +195,10 @@ export function createAmazonSessionController(
 				if (settled) return;
 				settled = true;
 				clearTimeout(timer);
+				clearInterval(lifecycle);
+				if (state.cancelPending === closed)
+					state.cancelPending = undefined;
+				window.webContents.removeListener("destroyed", closed);
 				window.removeListener("closed", closed);
 				if (error) reject(error);
 				else resolve(result);
@@ -201,6 +209,11 @@ export function createAmazonSessionController(
 					finish(false, new Error("Amazon notebook load timed out")),
 				60000,
 			);
+			const lifecycle = setInterval(() => {
+				if (window.isDestroyed()) closed();
+			}, 1000);
+			state.cancelPending = closed;
+			window.webContents.once("destroyed", closed);
 			window.once("closed", closed);
 			void window
 				.loadURL(url)
@@ -235,6 +248,7 @@ export function createAmazonSessionController(
 	function interactive(
 		window: BrowserWindow,
 		urls: AmazonRegionUrls,
+		state: RegionState,
 	): Promise<BrowserWindow | null> {
 		return new Promise((resolve, reject) => {
 			let settled = false;
@@ -244,6 +258,10 @@ export function createAmazonSessionController(
 				if (settled) return;
 				settled = true;
 				clearTimeout(timer);
+				clearInterval(lifecycle);
+				if (state.cancelPending === closed)
+					state.cancelPending = undefined;
+				window.webContents.removeListener("destroyed", closed);
 				window.removeListener("closed", closed);
 				window.webContents.removeListener("did-finish-load", loaded);
 				window.webContents.removeListener("did-fail-load", failed);
@@ -282,7 +300,16 @@ export function createAmazonSessionController(
 						window.hide();
 						finish(window);
 					} else if (
-						exactPage(page.url, urls.cloudReaderUrl) &&
+						exactPage(page.url, urls.notebookUrl) &&
+						load(page.html)(AUTH_FORMS).length === 0
+					) {
+						finish(
+							null,
+							new Error("Amazon notebook content unavailable"),
+						);
+					} else if (
+						new URL(page.url).origin ===
+							new URL(urls.cloudReaderUrl).origin &&
 						load(page.html)(AUTH_FORMS).length === 0
 					) {
 						inspecting = false;
@@ -312,6 +339,11 @@ export function createAmazonSessionController(
 				() => finish(null, new Error("Amazon login timed out")),
 				10 * 60 * 1000,
 			);
+			const lifecycle = setInterval(() => {
+				if (window.isDestroyed()) closed();
+			}, 1000);
+			state.cancelPending = closed;
+			window.webContents.once("destroyed", closed);
 			window.once("closed", closed);
 			window.webContents.on("did-finish-load", loaded);
 			window.webContents.on("did-fail-load", failed);
@@ -385,7 +417,11 @@ export function createAmazonSessionController(
 			const cookies = await state.session.cookies.get({});
 			if (!active(state)) return null;
 			if (cookies.length) {
-				const valid = await loadNotebook(window, urls.notebookUrl);
+				const valid = await loadNotebook(
+					window,
+					urls.notebookUrl,
+					state,
+				);
 				if (valid === null) return null;
 				if (valid) {
 					state.authenticated = true;
@@ -393,7 +429,7 @@ export function createAmazonSessionController(
 					return window;
 				}
 			}
-			const result = await interactive(window, urls);
+			const result = await interactive(window, urls, state);
 			if (result && active(state)) {
 				state.authenticated = true;
 				await persist(region);

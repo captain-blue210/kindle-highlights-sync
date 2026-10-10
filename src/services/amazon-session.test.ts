@@ -468,3 +468,76 @@ it("blocks cross-region and external HTTP redirects in the isolated login window
 	expect(allowed.preventDefault).not.toHaveBeenCalled();
 	s.controller.dispose();
 });
+
+it("settles pending login on disposal even when the window sends no closed notification", async () => {
+	const s = setup();
+	const pending = s.controller.ensureAuthenticated("co.jp");
+	await tick();
+	s.windows[0].destroy = () => {
+		s.windows[0].destroyed = true;
+	};
+	let settled = false;
+	void pending.then(() => {
+		settled = true;
+	});
+	s.controller.dispose();
+	await tick();
+	expect(settled).toBe(true);
+	expect(await pending).toBeNull();
+});
+
+it("verifies the notebook after login returns to a modern reader library path", async () => {
+	const s = setup();
+	const pending = s.controller.ensureAuthenticated("co.jp");
+	await tick();
+	s.windows[0].jar.cookies.push(cookie);
+	s.windows[0].navigate(
+		"https://read.amazon.co.jp/kindle-library",
+		"<div>Reader library</div>",
+	);
+	let settled = false;
+	void pending.then(() => {
+		settled = true;
+	});
+	await tick();
+	await tick();
+	try {
+		expect(settled).toBe(true);
+		expect(await pending).toBe(s.windows[0] as any);
+		expect(s.secretIds["co.jp"]).toBeTruthy();
+	} finally {
+		s.controller.dispose();
+	}
+});
+
+it("rejects an invalid notebook instead of transitioning back to the same page", async () => {
+	const s = setup();
+	let notebookLoads = 0;
+	s.setRoute((url) => {
+		if (url.includes("/notebook")) notebookLoads++;
+		return {
+			url,
+			html: url.includes("/notebook")
+				? library
+				: '<form name="signIn"></form>',
+		};
+	});
+	const pending = s.controller.ensureAuthenticated("co.jp");
+	await tick();
+	const outcome = pending.then(
+		() => false,
+		() => true,
+	);
+	s.windows[0].navigate(
+		"https://read.amazon.co.jp/notebook",
+		"<div>Unavailable</div>",
+	);
+	await tick();
+	await tick();
+	try {
+		expect(notebookLoads).toBe(0);
+		expect(await outcome).toBe(true);
+	} finally {
+		s.controller.dispose();
+	}
+});
