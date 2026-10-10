@@ -2,21 +2,36 @@
 
 Implementation branch: `codex/kindle-keychain-migration`, based on main `9b8baa5`.
 
-- Full automated suite: 99 tests across 12 files passed. Type checking and production build passed.
-- Authentication covers stored cookie restoration, cancellation, expired secrets, network failures, logout, region/vault isolation, redirects, concurrent secret saves, and window disposal using injected Electron/SecretStorage ports. Real Amazon login and actual application restart still require live verification.
-- A private copy of all 237 target notes passed conversion with no failures. Markdown bodies, existing book IDs/ASINs and unrelated nonempty properties were preserved for all 237. Repeating conversion made zero changes; copying verified backups back restored every original byte-for-byte.
-- 133 notes contained 260 differing source values. Conversion retained existing destination values, following the approved policy.
-- Metadata-only consecutive sync simulations preserved all 237 bodies and saved IDs; reconstructed highlights from 231 matching anchors were not appended again. Synthetic tests cover edited anchors, exact text/location matches without anchors, ambiguous edits, remote duplicates and hash collisions.
-- Final code review identified three issues: unreadable identity scans permitting duplicates, renamed curated properties being shadowed, and missing server redirect guards. Each was reproduced with a failing regression, fixed, and verified passing. Focused re-review approved these fixes and the added hadynz plain-text compatibility fix.
+## Automated verification and review
 
-Deployment, actual migration, user login and restart results will be recorded in the vault AI journal. PR creation and main merge require the user's completed-result confirmation.
+- All 99 tests across 12 files passed. Type checking and the production build passed.
+- Authentication tests cover saved cookie restoration, expiration, cancellation, network failures, logout, vault/region isolation, navigation guards, secret-save races, disposal and exceptions from released Electron objects.
+- Migration tests cover both hadynz schemas, custom aliases, empty values, conflicts, malformed YAML, unknown nested fields, backups and idempotence.
+- Sync tests cover saved IDs, hadynz anchors and plain text, edited/ambiguous highlights, duplicates, collisions, conservative identity matching and metadata-only updates.
+- Review findings were reproduced with failing regressions, fixed and approved in focused re-review. No outstanding code-review findings remain.
 
-Live verification exposed an authentication wait surviving a closed window. Added explicit cancellation, destroyed-event handling and a fallback lifecycle check. Reader library paths now trigger exact Notebook verification, while invalid Notebook content rejects instead of reloading. Three additional regressions passed RED→GREEN and focused review approved the fixes. Updated artifacts were redeployed; original build retained in vault backups.
+## Live authentication fixes
 
-The Continue browser escape was traced to an Obsidian-installed `will-navigate` external-browser router on the owned authentication window. A failing host-router regression reproduced the issue; replacing inherited navigation listeners only on a newly created owned window passed RED-to-GREEN while preserving regional guards, popup denial and shared windows. Full suite: 92 tests passed; production build/type check passed. Focused review approved the change. Live authentication is still pending.
+- Obsidian rejects secret IDs longer than 64 characters. The former partition-derived ID had 79 characters, so valid Amazon authentication could not be saved. Secret IDs are now bounded separately while Electron partitions retain their original identity. The production-contract regression failed before the fix and passed afterwards.
+- Amazon annotation responses are HTML fragments with pagination-state inputs, without the full annotations container. Validation now accepts these structured fragments and empty final pages, requires the requested ASIN and rejects sign-in, captcha, MFA and unknown content. The real-shape regression failed before the fix and passed afterwards.
+- Earlier live fixes addressed the host's external-browser navigation handler and authentication promises left unsettled by exceptions during window cleanup.
 
-The live busy-state failure was traced to listener cleanup on released Electron remote objects throwing before authentication promises settled. Both interactive authentication and saved-session validation now settle even when listener cleanup fails. Two failing regressions were verified RED-to-GREEN; all 94 tests and production build/type checking passed. Focused review approved the fix.
+## Deployment and migration
 
-Live storage failure: Obsidian validates secret IDs against lowercase letters/digits/hyphens and a 64-character maximum. The former partition-derived secret ID had 79 characters and was rejected despite valid Amazon authentication. SecretStorage IDs are now bounded separately; Electron partitions remain unchanged. Production-contract regression failed before the fix and passed afterwards; all 95 tests and production build/type check passed. Focused review approved it. Live saved-cookie validation succeeded without another login (16 region-approved cookies, one 64-character settings reference, no cookies/password in data.json). After explicitly clearing live cookies to zero and reloading the vault, the production plugin restored 16 cookies from Keychain, authenticated successfully and displayed no login window. Complete application restart and continuous sync verification are still pending.
+- Deployed production `main.js`, `manifest.json` and `styles.css` to `/Users/captain-blue210/GitHub/second-brain/.obsidian/plugins/kindle-highlights-sync/`; artifacts were checked against the build. Minimum Obsidian version is 1.11.4.
+- Japan store and `knowledge/読書ノート` are configured. The old plugin remains installed and disabled; the new plugin is enabled.
+- A private copy of all 237 target notes converted without failures. All bodies, saved IDs/ASINs and unrelated nonempty properties were preserved. Repeating conversion made zero changes; restoring verified backups reproduced every original byte-for-byte.
+- Actual migration converted 237 notes, skipped 4 and failed 0. Existing destination values were retained for 260 differing source values across 133 notes. All 237 bodies and IDs were preserved and repeating migration proposed zero changes.
+- Actual migration backup: `.obsidian/plugins/kindle-highlights-sync/backups/2026-10-10T02-36-40-225Z`. Previous plugin artifacts are retained in deployment/patch backups.
 
-Real annotation responses are fragments with two pagination-state input markers and annotation rows, without the full `#kp-notebook-annotations` container. Fetch validation now accepts these structured fragments, including empty final pages, requires the requested ASIN and rejects sign-in/captcha/MFA forms or unknown content. A failing real-shape regression passed after the change, with invalid-response tests retained. All 99 tests passed; type checking and production build passed after correcting an added test's Cheerio type annotation. Focused review approved the fix. A new live sync verification is in progress.
+## Live authentication and sync
+
+- Real Amazon login saved 16 regional cookies in Obsidian SecretStorage. Ordinary settings contain one 64-character reference and no cookie/password values.
+- Live Electron cookies were explicitly cleared to zero while retaining the secret. After vault reload, the production plugin restored 16 cookies, authenticated successfully and showed no login window.
+- First live sync fetched 148 books / 160 pages without fetch failures: created 0, updated 135, added 11 highlights, held 1, failed 2.
+- Second live sync fetched 149 books / 161 pages without fetch failures: created 0, updated 136, added 0 highlights, held 1, failed 2. It completed on 2026-10-10 at 12:05:51 UTC.
+- After both syncs all 237 original bodies remain intact as prefixes, all saved IDs/ASINs and prior anchor occurrence counts are preserved, and no notes are missing. Comparing the second sync with the first shows byte-identical Markdown bodies for all 237 notes and no repeated highlights.
+- The two note failures are pre-existing duplicate-ASIN pairs for Fourth Wing and 感情類語辞典. The held note is 英文解釈教室, where highlight IDs collide. These notes were left unchanged instead of choosing or overwriting ambiguous data.
+- Full application restart is still pending. Invoking normal quit did not terminate the existing application process. The user has been asked to quit with Command-Q and reopen; this is distinct from the successful vault-reload restoration test. No force termination was used.
+
+PR creation and main merge remain pending the user's explicit confirmation of completed results.
