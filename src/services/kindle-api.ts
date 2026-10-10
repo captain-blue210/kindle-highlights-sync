@@ -251,9 +251,16 @@ export class KindleApiService {
 					pageUrl.hostname !==
 						new URL(regionUrls.notebookUrl).hostname ||
 					pageUrl.pathname !== "/notebook" ||
-					!$("#kp-notebook-annotations").length ||
+					pageUrl.searchParams.get("asin") !== book.asin ||
+					!(
+						$("#kp-notebook-annotations").length ||
+						// Amazon returns annotation fragments, including empty final pages.
+						($("input.kp-notebook-content-limit-state").length &&
+							$("input.kp-notebook-annotations-next-page-start")
+								.length)
+					) ||
 					$(
-						'form[action*="signin"], #ap_signin_form, #auth-captcha-image',
+						'form[name="signIn"], form[action*="signin"], #ap_signin_form, #ap_password, #auth-captcha-image, #captchacharacters, #auth-mfa-otpcode',
 					).length
 				)
 					throw new Error(

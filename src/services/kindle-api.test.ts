@@ -54,3 +54,73 @@ describe("Kindle fetching completeness", () => {
 		).rejects.toThrow();
 	});
 });
+
+const fragment = (text = "") =>
+	'<input class="kp-notebook-content-limit-state" value="">' +
+	'<input class="kp-notebook-annotations-next-page-start" value="">' +
+	(text
+		? `<div class="a-row a-spacing-base"><span id="highlight">${text}</span><input id="kp-annotation-location" value="10"></div>`
+		: "");
+const oneBook =
+	'<div id="kp-notebook-library"><div class="kp-notebook-library-each-book" id="ASIN0"><h2 class="kp-notebook-searchable">Book</h2></div></div>';
+function readyApi() {
+	const api = new KindleApiService({} as any);
+	(api as any).loggedIn = true;
+	(api as any).loginWindow = { isDestroyed: () => false };
+	return api;
+}
+it("accepts genuine annotation fragments including an empty final page", async () => {
+	vi.mocked(loadRemoteDom).mockImplementation(async (url) => {
+		let html = oneBook;
+		if (url.includes("asin="))
+			html = url.includes("token=next")
+				? fragment()
+				: fragment("abc").replace(
+						'annotations-next-page-start" value=""',
+						'annotations-next-page-start" value="next"',
+					);
+		return { dom: cheerio.load(html) as unknown as cheerio.CheerioAPI, html, finalUrl: url };
+	});
+	const result = await readyApi().fetchHighlights(
+		"co.jp",
+		new EventEmitter(),
+	);
+	expect(result.failedBooks).toBe(0);
+	expect(result.books).toHaveLength(1);
+	expect(result.highlights.map((h) => h.text)).toEqual(["abc"]);
+	expect(
+		vi
+			.mocked(loadRemoteDom)
+			.mock.calls.some(([url]) => url.includes("token=next")),
+	).toBe(true);
+});
+it.each(["unknown", "login", "wrong-book"])(
+	"holds an invalid annotation response: %s",
+	async (kind) => {
+		vi.mocked(loadRemoteDom).mockImplementation(async (url) => {
+			const html = url.includes("asin=")
+				? kind === "unknown"
+					? "<p>Unavailable</p>"
+					: fragment("abc") +
+						(kind === "login"
+							? '<form name="signIn"><input id="ap_password"></form>'
+							: "")
+				: oneBook;
+			return {
+				dom: cheerio.load(html) as unknown as cheerio.CheerioAPI,
+				html,
+				finalUrl:
+					kind === "wrong-book"
+						? url.replace("asin=ASIN0", "asin=OTHER")
+						: url,
+			};
+		});
+		const result = await readyApi().fetchHighlights(
+			"co.jp",
+			new EventEmitter(),
+		);
+		expect(result.failedBooks).toBe(1);
+		expect(result.books).toHaveLength(0);
+		expect(result.highlights).toHaveLength(0);
+	},
+);
