@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
 	SyncProgressTracker,
 	safeErrorMessage,
@@ -77,5 +77,64 @@ describe("safe diagnostic causes", () => {
 		expect(
 			readErrorRecord({ operation: "sync", issues: "bad" }),
 		).toBeUndefined();
+	});
+});
+
+
+afterEach(() => vi.useRealTimers());
+describe("sync activity history", () => {
+	it("records phase-specific outcomes and timing without counting a fetched book as saved", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(1000);
+		const tracker = new SyncProgressTracker(true);
+		expect(tracker.state.startedAt).toBe(1000);
+		expect(tracker.state.endedAt).toBeNull();
+		tracker.startPhase("fetch", 1);
+		tracker.startBook("A");
+		vi.setSystemTime(1250);
+		tracker.settleBook("a", "success");
+		tracker.settleBook("a", "success");
+		tracker.startPhase("save", 1);
+		expect(tracker.state.counts.completed).toBe(0);
+		tracker.startBook("A");
+		vi.setSystemTime(2000);
+		tracker.settleBook("a", "unchanged");
+		tracker.finish("completed");
+		const endings = tracker.state.activityLog.filter(e => e.kind === "book-end");
+		expect(endings).toMatchObject([
+			{ phase: "fetch", bookTitle: "A", outcome: "success", at: 1250, deltaMs: 250 },
+			{ phase: "save", bookTitle: "A", outcome: "unchanged", at: 2000, deltaMs: 750 },
+		]);
+		expect(tracker.state.endedAt).toBe(2000);
+		expect(tracker.state.activityLog[tracker.state.activityLog.length - 1]).toMatchObject({ kind: "result", status: "completed" });
+	});
+	it("retains the latest 250 entries including safe errors and terminal outcomes", () => {
+		const tracker = new SyncProgressTracker(false);
+		tracker.startPhase("save", 300);
+		for (let i = 0; i < 300; i++) {
+			tracker.startBook(`Book ${i}`);
+			tracker.settleBook(String(i), i === 298 ? "held" : "success");
+		}
+		tracker.addIssue({ phase: "save", message: "cookie=secret <html>secret</html>" });
+		tracker.addIssue({ phase: "save", message: "cookie=secret <html>secret</html>" });
+		tracker.finish("partial");
+		expect(tracker.state.activityLog).toHaveLength(250);
+		expect(tracker.state.activityLog[0].id).toBeGreaterThan(1);
+		expect(tracker.state.activityLog.filter(e => e.kind === "issue")).toHaveLength(1);
+		expect(JSON.stringify(tracker.state.activityLog)).not.toContain("secret");
+		expect(tracker.state.activityLog).toEqual(expect.arrayContaining([
+			expect.objectContaining({ kind: "book-end", bookTitle: "Book 298", outcome: "held" }),
+			expect.objectContaining({ kind: "result", status: "partial" }),
+		]));
+		expect(tracker.state.issues).toHaveLength(1);
+	});
+	it("logs names for failures settled without a start notification", () => {
+		const tracker = new SyncProgressTracker(false);
+		tracker.startPhase("save", 1);
+		tracker.settleBook("a", "failed", "Unreadable book");
+		expect(tracker.state.activityLog[tracker.state.activityLog.length - 1]).toMatchObject({
+			kind: "book-end", phase: "save", bookTitle: "Unreadable book", outcome: "failed"
+		});
+		expect(tracker.state.counts.completed).toBe(0);
 	});
 });

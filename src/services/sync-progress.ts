@@ -22,6 +22,17 @@ export interface SyncErrorRecord {
 	counts?: BookCounts;
 	issues: SyncIssue[];
 }
+export type SyncActivityData =
+	| { kind: "phase"; phase: SyncPhase; total: number | null }
+	| { kind: "book-start"; phase: SyncPhase; bookTitle: string }
+	| { kind: "book-end"; phase: SyncPhase; bookTitle?: string; outcome: BookStatus }
+	| { kind: "issue"; issue: SyncIssue }
+	| { kind: "result"; status: SyncProgressState["status"]; counts: BookCounts };
+export type SyncActivityEntry = SyncActivityData & {
+	id: number;
+	at: number;
+	deltaMs?: number;
+};
 export interface SyncProgressState {
 	phase: SyncPhase;
 	status: "running" | "completed" | "partial" | "failed" | "interrupted";
@@ -29,6 +40,9 @@ export interface SyncProgressState {
 	currentBook: string | null;
 	issues: SyncIssue[];
 	metadataEnabled: boolean;
+	startedAt: number;
+	endedAt: number | null;
+	activityLog: SyncActivityEntry[];
 }
 
 // Only recognized application reasons and system codes cross the diagnostics boundary.
@@ -158,6 +172,7 @@ export function readErrorRecord(value: unknown): SyncErrorRecord | undefined {
 export class SyncProgressTracker extends EventEmitter {
 	state: SyncProgressState;
 	private settled = new Set<string>();
+	private nextLogId = 1;
 	constructor(metadataEnabled: boolean) {
 		super();
 		this.state = {
@@ -165,9 +180,22 @@ export class SyncProgressTracker extends EventEmitter {
 			status: "running",
 			currentBook: null,
 			metadataEnabled,
+			startedAt: Date.now(),
+			endedAt: null,
+			activityLog: [],
 			counts: { total: null, completed: 0, failed: 0, held: 0 },
 			issues: [],
 		};
+		this.addActivity({ kind: "phase", phase: "auth", total: null }, this.state.startedAt);
+	}
+	private addActivity(data: SyncActivityData, at = Date.now()) {
+		const entries = this.state.activityLog;
+		const previous = entries[entries.length - 1];
+		const entry: SyncActivityEntry = {
+			...data, id: this.nextLogId++, at,
+			...(previous ? { deltaMs: Math.max(0, at - previous.at) } : {}),
+		};
+		this.state = { ...this.state, activityLog: [...entries, entry].slice(-250) };
 	}
 	private publish() {
 		this.emit("change", this.state);
@@ -178,16 +206,19 @@ export class SyncProgressTracker extends EventEmitter {
 			...this.state,
 			phase,
 			status: "running",
+			endedAt: null,
 			currentBook: null,
 			counts: { total, completed: 0, failed: 0, held: 0 },
 		};
+		this.addActivity({ kind: "phase", phase, total });
 		this.publish();
 	}
 	startBook(title: string) {
 		this.state = { ...this.state, currentBook: title };
+		this.addActivity({ kind: "book-start", phase: this.state.phase, bookTitle: title });
 		this.publish();
 	}
-	settleBook(id: string, status: BookStatus) {
+	settleBook(id: string, status: BookStatus, bookTitle = this.state.currentBook ?? undefined) {
 		if (this.settled.has(id)) return;
 		this.settled.add(id);
 		const counts = { ...this.state.counts };
@@ -195,6 +226,7 @@ export class SyncProgressTracker extends EventEmitter {
 		else if (status === "held") counts.held++;
 		else counts.completed++;
 		this.state = { ...this.state, counts, currentBook: null };
+		this.addActivity({ kind: "book-end", phase: this.state.phase, bookTitle, outcome: status });
 		this.publish();
 	}
 	addIssue(issue: SyncIssue) {
@@ -206,15 +238,19 @@ export class SyncProgressTracker extends EventEmitter {
 		)
 			return;
 		this.state = { ...this.state, issues: [...this.state.issues, safe] };
+		this.addActivity({ kind: "issue", issue: safe });
 		this.publish();
 	}
 	finish(status: SyncProgressState["status"], counts = this.state.counts) {
+		const endedAt = Date.now();
 		this.state = {
 			...this.state,
 			status,
 			counts: { ...counts },
+			endedAt,
 			currentBook: null,
 		};
+		this.addActivity({ kind: "result", status, counts: { ...counts } }, endedAt);
 		this.publish();
 	}
 }

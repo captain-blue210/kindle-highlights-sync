@@ -15,137 +15,208 @@ If your plugin does not need CSS, delete this file.
 	white-space: pre-wrap;
 }
 
+/* Centered progress presentation, inspired by hadynz/obsidian-kindle-plugin. */
 .kindle-sync-modal {
-	width: min(680px, 92vw);
+	width: min(600px, 92vw);
 }
-.kindle-sync-card,
-.kindle-diagnostics-card {
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 14px;
-	background: var(--background-primary);
-	padding: 24px;
+.kindle-sync-modal [hidden] {
+	display: none !important;
 }
-.kindle-sync-heading {
+.kindle-sync-content {
 	display: flex;
+	flex-direction: column;
 	align-items: center;
 	gap: 12px;
-	margin-bottom: 20px;
-}
-.kindle-sync-status {
-	font-size: var(--font-ui-medium);
-	font-weight: 600;
+	margin: 32px 0;
+	text-align: center;
 }
 .kindle-sync-state-icon {
 	display: flex;
-	color: var(--interactive-accent);
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	width: 56px;
+	height: 56px;
+	border-radius: 50%;
+	color: var(--background-primary);
+	background: var(--text-success, var(--interactive-accent));
 }
 .kindle-sync-state-icon svg {
-	width: 28px;
-	height: 28px;
+	width: 30px;
+	height: 30px;
 }
-.kindle-sync-state-icon.is-running svg {
-	animation: kindle-sync-spin 1.6s linear infinite;
+.kindle-sync-state-icon.is-running {
+	width: 90px;
+	height: 90px;
+	color: var(--interactive-accent);
+	background: transparent;
+}
+.kindle-sync-dot {
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: currentColor;
+	animation: kindle-sync-jump 1.6s ease-in-out infinite;
+}
+.kindle-sync-dot:nth-child(2) {
+	animation-delay: 160ms;
+}
+.kindle-sync-dot:nth-child(3) {
+	animation-delay: 320ms;
 }
 .kindle-sync-state-icon.is-failed,
-.kindle-sync-state-icon.is-partial,
-.kindle-sync-state-icon.is-interrupted {
+.kindle-sync-state-icon.is-partial {
 	color: var(--text-warning, var(--text-error));
+	background: var(--background-secondary);
 }
-.kindle-sync-stages {
-	display: flex;
-	gap: 6px;
-	list-style: none;
-	padding: 0;
-	margin: 0 0 24px;
-}
-.kindle-sync-stages li {
-	flex: 1;
-	border-top: 3px solid var(--background-modifier-border);
-	padding-top: 8px;
-	font-size: var(--font-ui-small);
+.kindle-sync-state-icon.is-interrupted {
 	color: var(--text-muted);
+	background: var(--background-secondary);
 }
-.kindle-sync-stages li.is-active {
-	border-color: var(--interactive-accent);
-	color: var(--text-normal);
-	font-weight: 600;
-}
-.kindle-sync-stages li.is-done {
-	border-color: var(--interactive-accent);
+.kindle-sync-status {
+	font-size: 1.2em;
 }
 .kindle-sync-current-book {
-	font-weight: 500;
+	width: 100%;
+	max-width: 450px;
+	color: var(--text-muted);
 	line-height: 1.6;
 	overflow-wrap: anywhere;
-	margin-bottom: 14px;
+}
+.kindle-sync-current-book strong {
+	color: var(--text-normal);
+}
+.kindle-sync-result-count {
+	display: flex;
+	align-items: baseline;
+	justify-content: center;
+	gap: 8px;
+}
+.kindle-sync-result-count strong {
+	font-size: 2.4em;
+	font-weight: 500;
+	line-height: normal;
+	color: var(--interactive-accent);
+	font-variant-numeric: tabular-nums;
+}
+.kindle-sync-result-count span {
+	font-size: 1.2em;
 }
 .kindle-sync-progress-row {
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	margin-bottom: 24px;
+	width: min(400px, 100%);
+	margin-top: 2px;
 }
 .kindle-sync-progress {
 	flex: 1;
 	width: 100%;
 	min-width: 0;
-	height: 10px;
+	height: 6px;
 	appearance: none;
 	border: 0;
-	border-radius: 999px;
+	border-radius: 3px;
 	overflow: hidden;
 	background: var(--background-modifier-border);
 	accent-color: var(--interactive-accent);
 }
 .kindle-sync-progress::-webkit-progress-bar {
 	background: var(--background-modifier-border);
-	border-radius: 999px;
+	border-radius: 3px;
 }
 .kindle-sync-progress::-webkit-progress-value {
 	background: var(--interactive-accent);
-	border-radius: 999px;
-	transition: width 180ms ease;
+	border-radius: 3px;
+	transition: width 300ms ease;
 }
 .kindle-sync-progress:not([value])::-webkit-progress-bar {
-	background: linear-gradient(
-		90deg,
-		var(--background-modifier-border),
-		var(--interactive-accent),
-		var(--background-modifier-border)
-	);
+	background: linear-gradient(90deg, var(--background-modifier-border), var(--interactive-accent), var(--background-modifier-border));
 	background-size: 200% 100%;
 	animation: kindle-sync-pulse 2s linear infinite;
 }
-.kindle-sync-percent {
-	flex: 0 0 auto;
+.kindle-sync-count-label,
+.kindle-sync-secondary-counts,
+.kindle-sync-duration {
 	color: var(--text-muted);
-	font-size: var(--font-ui-small);
+	font-size: 0.85em;
 	font-variant-numeric: tabular-nums;
 }
-.kindle-sync-counts {
-	display: grid;
-	grid-template-columns: repeat(4, minmax(0, 1fr));
-	gap: 10px;
+.kindle-sync-count-label {
+	flex: 0 0 auto;
+	white-space: nowrap;
 }
-.kindle-sync-count {
+.kindle-sync-duration {
+	color: var(--text-faint);
+}
+.kindle-sync-log {
+	width: 100%;
+	max-width: 520px;
+	margin: 12px auto 0;
+	padding: 10px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
 	background: var(--background-secondary);
-	padding: 14px 10px;
-	border-radius: 10px;
+}
+.kindle-sync-log-header,
+.kindle-sync-copy-controls {
 	display: flex;
-	flex-direction: column;
+	align-items: center;
 	gap: 8px;
 }
-.kindle-sync-count span {
+.kindle-sync-log-header {
+	justify-content: space-between;
+	margin-bottom: 8px;
 	color: var(--text-muted);
-	font-size: var(--font-ui-small);
+	font-size: 0.85em;
 }
-.kindle-sync-count strong {
-	font-size: 26px;
-	font-variant-numeric: tabular-nums;
+.kindle-sync-copy-controls {
+	justify-content: flex-end;
+	flex-wrap: wrap;
 }
-.kindle-sync-count [data-count="failed"],
-.kindle-sync-count [data-count="held"] {
+.kindle-sync-copy-log {
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	padding: 4px 6px;
+	color: var(--text-muted);
+	font-size: inherit;
+}
+.kindle-sync-copy-log:hover {
+	color: var(--text-normal);
+}
+.kindle-sync-log-body {
+	height: 160px;
+	overflow: auto;
+	overflow-anchor: none;
+}
+.kindle-sync-log-line {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	font-size: 0.9em;
+	line-height: 1.5;
+	padding: 2px 0;
+}
+.kindle-sync-log-line.is-warning {
 	color: var(--text-warning, var(--text-error));
+}
+.kindle-sync-log-text {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+.kindle-sync-log-book {
+	font-weight: 600;
+}
+.kindle-sync-log-delta {
+	flex: 0 0 64px;
+	text-align: right;
+	color: var(--text-faint);
+	font-size: 0.85em;
+	font-variant-numeric: tabular-nums;
+	font-family: var(--font-monospace);
 }
 .kindle-sync-errors {
 	margin-top: 20px;
@@ -187,6 +258,9 @@ If your plugin does not need CSS, delete this file.
 	margin: 0;
 }
 .kindle-diagnostics-card {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 14px;
+	background: var(--background-primary);
 	margin-bottom: 24px;
 	padding: 18px;
 }
@@ -199,31 +273,26 @@ If your plugin does not need CSS, delete this file.
 	font-size: var(--font-ui-small);
 	line-height: 1.6;
 }
-@keyframes kindle-sync-spin {
-	to {
-		transform: rotate(360deg);
-	}
+@keyframes kindle-sync-jump {
+	0%, 60%, 100% { transform: translateY(0); }
+	30% { transform: translateY(-18px); }
 }
 @keyframes kindle-sync-pulse {
-	to {
-		background-position: -200% 0;
-	}
+	to { background-position: -200% 0; }
 }
 @media (max-width: 480px) {
-	.kindle-sync-card {
-		padding: 16px;
-	}
-	.kindle-sync-counts {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-	}
-	.kindle-sync-stages {
-		flex-wrap: wrap;
-	}
-	.kindle-sync-stages li {
-		flex-basis: 40%;
-	}
 	.kindle-sync-progress-row {
-		flex-wrap: wrap;
+	 flex-wrap: wrap;
+	 justify-content: center;
+	}
+	.kindle-sync-progress {
+	 flex-basis: 100%;
+	}
+	.kindle-sync-log-header {
+	 align-items: flex-start;
+	}
+	.kindle-sync-log-delta {
+	 flex-basis: 52px;
 	}
 }
 @media (prefers-reduced-motion: reduce) {

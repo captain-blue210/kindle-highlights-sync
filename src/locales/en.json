@@ -180,7 +180,35 @@
     "unknownTotal": "Determining total books",
     "barLabel": "Books processed: {{phase}}",
     "close": "Close",
-    "closeHint": "Sync continues when this window is closed."
+    "closeHint": "Sync continues when this window is closed.",
+    "bookPrefix": "Current book: ",
+    "booksCompleted": "books completed",
+    "countSummary": "Completed {{completed}} of {{total}} books",
+    "secondaryCounts": "Failed {{failed}} · Needs review {{held}}",
+    "duration": "Duration {{duration}}",
+    "activity": {
+      "title": "Activity log",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Could not copy the log",
+      "phase": "{{phase}} — {{total}}",
+      "total": "{{total}} books",
+      "bookStart": "{{phase}}: {{title}} — Started",
+      "bookEnd": "{{phase}}: {{title}} — {{outcome}}",
+      "unnamed": "No book selected",
+      "issue": "{{phase}}: {{title}} — {{message}}",
+      "result": "{{status}} — Total {{total}} · Completed {{completed}} · Failed {{failed}} · Needs review {{held}}",
+      "outcomes": {
+        "auth": "Connected",
+        "fetch": "Fetched",
+        "metadata": "Metadata ready",
+        "save": "Saved",
+        "session": "Session saved",
+        "unchanged": "Unchanged",
+        "failed": "Failed",
+        "held": "Needs review"
+      }
+    }
   },
   "diagnostics": {
     "title": "Last error",

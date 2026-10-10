@@ -326,7 +326,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 						bookTitle: event.bookTitle,
 						message: event.error,
 					});
-				tracker.settleBook(event.bookId, event.status);
+				tracker.settleBook(event.bookId, event.status, event.bookTitle);
 				fetchFailed = tracker.state.counts.failed;
 			},
 		);
@@ -389,9 +389,9 @@ export default class KindleHighlightsPlugin extends Plugin {
 				books,
 				highlights,
 				(book) => tracker.startBook(book.title),
-				(_book, index, outcome) => {
+				(book, index, outcome) => {
 					for (const issue of outcome.issues) tracker.addIssue(issue);
-					tracker.settleBook(String(index), outcome.status);
+					tracker.settleBook(String(index), outcome.status, book.title);
 				},
 			);
 			for (const issue of result.issues ?? []) tracker.addIssue(issue);

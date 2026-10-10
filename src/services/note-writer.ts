@@ -138,6 +138,7 @@ export async function saveBookNotes(
 					);
 					added = merged.added;
 					warnings = merged.warnings;
+					outcome.status = merged.content === current ? "unchanged" : "success";
 					existing.content = merged.content;
 					return merged.content;
 				});

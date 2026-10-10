@@ -176,3 +176,15 @@ it("retains unreadable note details even with zero fetched books", async () => {
 	]);
 	expect(result.failed).toBe(0);
 });
+
+
+it("reports an identical existing note as unchanged while retaining its successful completion", async () => {
+ const io=memoryVault();
+ await saveBookNotes(io,config,[book],[highlight]);
+ const original=io.files.get("books/Renamed Book.md");
+ const outcomes:string[]=[];
+ await saveBookNotes(io,config,[book],[highlight],undefined,
+  (_book,_index,outcome)=>outcomes.push(outcome.status));
+ expect(io.files.get("books/Renamed Book.md")).toBe(original);
+ expect(outcomes).toEqual(["unchanged"]);
+});
