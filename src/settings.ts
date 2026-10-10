@@ -1,3 +1,5 @@
+import { renderErrorRecord } from "./ui/sync-diagnostics";
+import type { SyncErrorRecord } from "./services/sync-progress";
 // settings.ts
 import { App, Notice, PluginSettingTab, Setting } from "obsidian"; // Modal を削除
 import { getCurrentLocale, getTranslations, loadTranslations, t } from "./i18n"; // Import loadTranslations and t function
@@ -26,6 +28,7 @@ const AMAZON_REGION_KEYS: string[] = [
 ];
 
 export interface KindleHighlightsSettings {
+	lastErrorRecord?: SyncErrorRecord;
 	outputDirectory: string;
 	templateContent: string;
 	amazonRegion: string;
@@ -85,6 +88,7 @@ updated:
 
 export class KindleHighlightsSettingTab extends PluginSettingTab {
 	plugin: KindleHighlightsPlugin;
+	private detachDiagnostics?: () => void;
 
 	constructor(app: App, plugin: KindleHighlightsPlugin) {
 		super(app, plugin);
@@ -100,6 +104,18 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 
 		const { containerEl } = this;
 		containerEl.empty();
+		this.detachDiagnostics?.();
+		const diagnosticContainer = containerEl.createDiv();
+		const updateDiagnostics = () =>
+			renderErrorRecord(
+				diagnosticContainer,
+				this.plugin.settings.lastErrorRecord,
+				() => this.plugin.clearErrorRecord(),
+			);
+		updateDiagnostics();
+		this.plugin.diagnostics.on("change", updateDiagnostics);
+		this.detachDiagnostics = () =>
+			this.plugin.diagnostics.off("change", updateDiagnostics);
 
 		// 1. ノート保存先ディレクトリ設定
 		new Setting(containerEl)
@@ -599,6 +615,11 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}),
 			);
+	}
+
+	hide() {
+		this.detachDiagnostics?.();
+		this.detachDiagnostics = undefined;
 	}
 
 	private addCodeExampleHelper(

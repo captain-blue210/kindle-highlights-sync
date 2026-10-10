@@ -88,3 +88,91 @@ it("blocks writes if an existing note cannot be read for identity matching", asy
 	expect(result.created).toBe(0);
 	expect(io.files.size).toBe(1);
 });
+
+describe("book completion notifications", () => {
+	it("reports completion only after a pending write settles", async () => {
+		const io = memoryVault();
+		let release!: () => void;
+		io.create = async () =>
+			new Promise<void>((r) => {
+				release = r;
+			});
+		const outcomes: string[] = [];
+		const saving = saveBookNotes(
+			io,
+			config,
+			[book],
+			[highlight],
+			undefined,
+			(_book, _index, outcome) => outcomes.push(outcome.status),
+		);
+		await Promise.resolve();
+		expect(outcomes).toEqual([]);
+		release();
+		await saving;
+		expect(outcomes).toEqual(["success"]);
+	});
+	it("settles books with no highlights and failed writes exactly once", async () => {
+		const outcomes: string[] = [];
+		const io = memoryVault();
+		io.create = async () => {
+			throw Object.assign(Error("private data"), { code: "ENOSPC" });
+		};
+		await saveBookNotes(
+			io,
+			config,
+			[book, { ...book, id: "EMPTY", asin: "EMPTY" }],
+			[highlight],
+			undefined,
+			(_book, _index, outcome) =>
+				outcomes.push(
+					outcome.status + ":" + (outcome.issues[0]?.message ?? ""),
+				),
+		);
+		expect(outcomes).toEqual([
+			"failed:Filesystem error: ENOSPC",
+			"unchanged:",
+		]);
+	});
+	it("reports held notes and unreadable identity scans without success", async () => {
+		const outcomes: string[] = [];
+		const io = memoryVault({
+			"books/B.md":
+				"---\nbookId: id\ntitle: B\nASIN: ABC\n---\n> Edited\n> [10](kindle://book?action=open&asin=ABC&location=10)\n",
+		});
+		await saveBookNotes(
+			io,
+			config,
+			[book],
+			[highlight],
+			undefined,
+			(_book, _index, outcome) => outcomes.push(outcome.status),
+		);
+		expect(outcomes).toEqual(["held"]);
+		io.read = async () => {
+			throw Error("unreadable");
+		};
+		outcomes.length = 0;
+		await saveBookNotes(
+			io,
+			config,
+			[book],
+			[highlight],
+			undefined,
+			(_book, _index, outcome) => outcomes.push(outcome.status),
+		);
+		expect(outcomes).toEqual(["failed"]);
+	});
+});
+
+it("retains unreadable note details even with zero fetched books", async () => {
+	const io = memoryVault({ "books/B.md": "existing" });
+	io.read = async () => {
+		throw Error("unreadable");
+	};
+	const result = await saveBookNotes(io, config, [], []);
+	expect(result.issues).toEqual([
+		{ phase: "save", path: "books/B.md", message: "Unreadable note" },
+	]);
+	expect(result.failed).toBe(0);
+});

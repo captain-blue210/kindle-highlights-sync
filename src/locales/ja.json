@@ -152,5 +152,48 @@
     "description": "セッションCookieをObsidianキーチェーンに保存します。メールアドレス・パスワードは保存しません。",
     "login": "ログイン・接続確認",
     "failed": "Amazonに接続できませんでした。ノートは変更されていません。"
+  },
+  "progress": {
+    "title": "Kindle同期",
+    "phases": {
+      "auth": "Amazonに接続中",
+      "fetch": "書籍を取得中",
+      "metadata": "メタデータを整理中",
+      "save": "ノートを保存中",
+      "session": "Amazonセッションを保存中"
+    },
+    "status": {
+      "completed": "同期完了",
+      "partial": "同期完了（一部失敗・確認待ち）",
+      "failed": "同期失敗",
+      "interrupted": "同期中断"
+    },
+    "counts": {
+      "total": "全体（冊）",
+      "completed": "完了（冊）",
+      "failed": "失敗（冊）",
+      "held": "確認待ち（冊）"
+    },
+    "currentBook": "処理中の書籍：{{title}}",
+    "waiting": "次の処理を準備しています",
+    "finishedBooks": "書籍の処理を終了しました",
+    "unknownTotal": "全体件数を確認中",
+    "barLabel": "{{phase}}の処理済み書籍の進捗",
+    "close": "閉じる",
+    "closeHint": "この画面を閉じても同期は続きます。"
+  },
+  "diagnostics": {
+    "title": "直近のエラー",
+    "empty": "保存されたエラーはありません。",
+    "details": "エラー・確認待ちの詳細",
+    "clear": "エラー記録を消去",
+    "counts": "全体 {{total}} 冊 · 完了 {{completed}} 冊 · 失敗 {{failed}} 冊 · 確認待ち {{held}} 冊",
+    "operations": {
+      "sync": "同期",
+      "login": "ログイン・接続確認",
+      "logout": "ログアウト"
+    },
+    "saveFailed": "エラー記録を保存できませんでした。起動中は設定画面で確認できます。",
+    "clearFailed": "エラー記録を消去できませんでした。"
   }
 }
