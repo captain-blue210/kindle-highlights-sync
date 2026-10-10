@@ -389,6 +389,10 @@ export function createAmazonSessionController(
 			checkActive();
 			if (!state.window || state.window.isDestroyed()) {
 				state.window = adapters.createWindow(state.partition);
+				// Obsidian installs an external-browser router on every new window.
+				// Replace it only on this newly created, exclusively owned login window;
+				// otherwise form submissions leave the isolated session before our guard runs.
+				state.window.webContents.removeAllListeners("will-navigate");
 				state.window.webContents.setWindowOpenHandler?.(() => ({
 					action: "deny",
 				}));

@@ -74,7 +74,11 @@ class FakeWindow extends EventEmitter {
 		}
 	}
 }
-function setup(payload?: string, vaultIdentity = "/vault/A") {
+function setup(
+	payload?: string,
+	vaultIdentity = "/vault/A",
+	initializeWindow?: (w: FakeWindow) => void,
+) {
 	const secretIds: Record<string, string> = {};
 	const secrets = new Map<string, string>();
 	if (payload !== undefined) {
@@ -134,6 +138,7 @@ function setup(payload?: string, vaultIdentity = "/vault/A") {
 		},
 		createWindow: (partition: string) => {
 			const w = new FakeWindow(jars.get(partition)!, (url) => route(url));
+			initializeWindow?.(w);
 			windows.push(w);
 			return w as unknown as BrowserWindow;
 		},
@@ -540,4 +545,38 @@ it("rejects an invalid notebook instead of transitioning back to the same page",
 	} finally {
 		s.controller.dispose();
 	}
+});
+
+it("keeps regional Continue navigation inside its owned window despite the host browser router", async () => {
+	const externalPages: string[] = [];
+	const shared = new EventEmitter();
+	const hostRouter = (event: { preventDefault(): void }, url: string) => {
+		event.preventDefault();
+		externalPages.push(url);
+	};
+	shared.on("will-navigate", hostRouter);
+	const s = setup(record(), "/vault/A", (w) =>
+		w.webContents.on("will-navigate", hostRouter),
+	);
+	await s.controller.ensureAuthenticated("co.jp");
+	const event = { preventDefault: vi.fn() };
+	s.windows[0].webContents.emit(
+		"will-navigate",
+		event,
+		"https://www.amazon.co.jp/ap/signin",
+	);
+	expect(event.preventDefault).not.toHaveBeenCalled();
+	expect(externalPages).toEqual([]);
+	expect(shared.listeners("will-navigate")).toEqual([hostRouter]);
+	for (const url of [
+		"https://www.amazon.com/ap/signin",
+		"https://example.com/",
+		"http://www.amazon.co.jp/ap/signin",
+	]) {
+		const denied = { preventDefault: vi.fn() };
+		s.windows[0].webContents.emit("will-navigate", denied, url);
+		expect(denied.preventDefault).toHaveBeenCalled();
+	}
+	expect(externalPages).toEqual([]);
+	s.controller.dispose();
 });
