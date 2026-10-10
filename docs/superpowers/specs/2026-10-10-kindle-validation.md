@@ -2,7 +2,7 @@
 
 Implementation branch: `codex/kindle-keychain-migration`, based on main `9b8baa5`.
 
-- Full automated suite: 94 tests across 12 files passed. Type checking and production build passed.
+- Full automated suite: 95 tests across 12 files passed. Type checking and production build passed.
 - Authentication covers stored cookie restoration, cancellation, expired secrets, network failures, logout, region/vault isolation, redirects, concurrent secret saves, and window disposal using injected Electron/SecretStorage ports. Real Amazon login and actual application restart still require live verification.
 - A private copy of all 237 target notes passed conversion with no failures. Markdown bodies, existing book IDs/ASINs and unrelated nonempty properties were preserved for all 237. Repeating conversion made zero changes; copying verified backups back restored every original byte-for-byte.
 - 133 notes contained 260 differing source values. Conversion retained existing destination values, following the approved policy.
@@ -16,3 +16,5 @@ Live verification exposed an authentication wait surviving a closed window. Adde
 The Continue browser escape was traced to an Obsidian-installed `will-navigate` external-browser router on the owned authentication window. A failing host-router regression reproduced the issue; replacing inherited navigation listeners only on a newly created owned window passed RED-to-GREEN while preserving regional guards, popup denial and shared windows. Full suite: 92 tests passed; production build/type check passed. Focused review approved the change. Live authentication is still pending.
 
 The live busy-state failure was traced to listener cleanup on released Electron remote objects throwing before authentication promises settled. Both interactive authentication and saved-session validation now settle even when listener cleanup fails. Two failing regressions were verified RED-to-GREEN; all 94 tests and production build/type checking passed. Focused review approved the fix.
+
+Live storage failure: Obsidian validates secret IDs against lowercase letters/digits/hyphens and a 64-character maximum. The former partition-derived secret ID had 79 characters and was rejected despite valid Amazon authentication. SecretStorage IDs are now bounded separately; Electron partitions remain unchanged. Production-contract regression failed before the fix and passed afterwards; all 95 tests and production build/type check passed. Focused review approved it. Live saved-cookie validation succeeded without another login (16 region-approved cookies, one 64-character settings reference, no cookies/password in data.json). After explicitly clearing live cookies to zero and reloading the vault, the production plugin restored 16 cookies from Keychain, authenticated successfully and displayed no login window. Complete application restart and continuous sync verification are still pending.

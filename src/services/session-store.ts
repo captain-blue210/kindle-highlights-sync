@@ -22,6 +22,14 @@ export function sessionKey(vaultIdentity: string, region: string): string {
 	);
 }
 
+/** Obsidian SecretStorage accepts lowercase IDs of at most 64 characters.
+ * Keep Electron's existing partition key separate so an active login survives.
+ * Its hash suffix keeps vault and region identifiers out of settings.
+ */
+export function secretKey(vaultIdentity: string, region: string): string {
+	return sessionKey(vaultIdentity, region).slice(0, 64);
+}
+
 export function approvedCookieDomain(domain: string, region: string): boolean {
 	const host = domain.replace(/^\./, "").toLowerCase();
 	const root = "amazon." + region;

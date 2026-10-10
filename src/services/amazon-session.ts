@@ -10,6 +10,7 @@ import {
 	restoreCookies,
 	serializeCookies,
 	sessionKey,
+	secretKey,
 } from "./session-store";
 
 export interface AmazonRegionUrls {
@@ -152,7 +153,7 @@ export function createAmazonSessionController(
 		state.restored = true;
 		const id = adapters.secretIds[region];
 		// References must belong to this vault/region; copied settings cannot share auth.
-		if (id !== sessionKey(adapters.vaultIdentity, region)) return;
+		if (id !== secretKey(adapters.vaultIdentity, region)) return;
 		const payload = await adapters.secrets.getSecret(id);
 		if (!payload) return;
 		for (const cookie of restoreCookies(payload, region, now())) {
@@ -382,7 +383,7 @@ export function createAmazonSessionController(
 		const cookies = await state.session.cookies.get({});
 		if (!state.authenticated || !active(state))
 			throw new Error("Amazon session is not authenticated");
-		const id = sessionKey(adapters.vaultIdentity, region);
+		const id = secretKey(adapters.vaultIdentity, region);
 		await writeSerially(region, async () => {
 			if (!state.authenticated || !active(state))
 				throw new Error("Amazon session is not authenticated");
@@ -481,7 +482,7 @@ export function createAmazonSessionController(
 			const state = stateFor(region);
 			states.delete(region);
 			destroy(state);
-			const id = sessionKey(adapters.vaultIdentity, region);
+			const id = secretKey(adapters.vaultIdentity, region);
 			await Promise.all([
 				writeSerially(region, async () => {
 					await adapters.secrets.setSecret(id, "");

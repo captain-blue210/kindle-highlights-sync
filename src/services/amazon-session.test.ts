@@ -6,7 +6,7 @@ import {
 	createAmazonSessionController,
 	isAuthenticatedNotebook,
 } from "./amazon-session";
-import { sessionKey } from "./session-store";
+import { secretKey } from "./session-store";
 const urls = (region: string) => ({
 	loginUrl: `https://www.amazon.${region}/ap/signin`,
 	cloudReaderUrl: `https://read.amazon.${region}/`,
@@ -82,13 +82,17 @@ function setup(
 	const secretIds: Record<string, string> = {};
 	const secrets = new Map<string, string>();
 	if (payload !== undefined) {
-		secretIds["co.jp"] = sessionKey(vaultIdentity, "co.jp");
+		secretIds["co.jp"] = secretKey(vaultIdentity, "co.jp");
 		secrets.set(secretIds["co.jp"], payload);
 	}
 	const jars = new Map<string, { cookies: any[]; cleared: number }>();
 	const windows: FakeWindow[] = [];
 	let savedRefs = 0;
 	let writeSecret = (id: string, payload: string): void | Promise<void> => {
+		if (!/^[a-z0-9-]+$/.test(id) || id.length > 64)
+			throw new Error(
+				"Obsidian secret ID must be lowercase and at most 64 characters",
+			);
 		secrets.set(id, payload);
 	};
 	let readSecret = (id: string): string | null | Promise<string | null> =>
@@ -263,7 +267,7 @@ describe("Amazon session authentication", () => {
 		await tick();
 		const otherWindow = s.windows[1];
 		await s.controller.logout("co.jp");
-		expect(s.secrets.get(sessionKey("/vault/A", "co.jp"))).toBe("");
+		expect(s.secrets.get(secretKey("/vault/A", "co.jp"))).toBe("");
 		expect(s.windows[0].destroyed).toBe(true);
 		expect(otherWindow.destroyed).toBe(false);
 		const jars = Array.from(s.jars.values());
@@ -436,7 +440,7 @@ describe("Amazon session authentication", () => {
 		release();
 		await saving;
 		await loggingOut;
-		expect(s.secrets.get(sessionKey("/vault/A", "co.jp"))).toBe("");
+		expect(s.secrets.get(secretKey("/vault/A", "co.jp"))).toBe("");
 		expect(s.secretIds["co.jp"]).toBeUndefined();
 	});
 

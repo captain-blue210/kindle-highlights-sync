@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { sessionKey, serializeCookies, restoreCookies } from "./session-store";
+import {
+	secretKey,
+	sessionKey,
+	serializeCookies,
+	restoreCookies,
+} from "./session-store";
 const cookie = {
 	name: "session-id",
 	value: "test-token",
@@ -57,4 +62,20 @@ describe("secret cookie records", () => {
 		);
 		expect(restoreCookies(payload, "co.jp", 1500)).toEqual([sessionCookie]);
 	});
+});
+
+it("uses bounded SecretStorage IDs without changing existing Electron partitions", () => {
+	const keys = [
+		secretKey("/vault/A", "co.jp"),
+		secretKey("/vault/B", "co.jp"),
+		secretKey("/vault/A", "com"),
+	];
+	expect(new Set(keys).size).toBe(3);
+	for (const key of keys) {
+		expect(key).toMatch(/^[a-z0-9-]+$/);
+		expect(key.length).toBeLessThanOrEqual(64);
+		expect(key).not.toContain("vault");
+	}
+	expect(secretKey("/vault/A", "co.jp")).toBe(keys[0]);
+	expect(sessionKey("/vault/A", "co.jp").length).toBe(79);
 });
