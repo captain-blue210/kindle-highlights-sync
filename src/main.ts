@@ -1,12 +1,26 @@
-import { EventEmitter } from "events"; // Import EventEmitter
-import { Notice, Plugin, TFile } from "obsidian"; // Ensure App is imported
-import { loadTranslations, t } from "./i18n"; // Import i18n functions
-import { AmazonLogoutModal } from "./modals/AmazonLogoutModal"; // Import Logout Modal
-import { SyncProgressModal } from "./modals/SyncProgressModal"; // Import Progress Modal
-import { Book, Highlight } from "./models";
-import { KindleApiService } from "./services/kindle-api"; // Import the service class
+import { EventEmitter } from "events";
+import { Modal, Notice, Plugin } from "obsidian";
+import { loadTranslations, t } from "./i18n";
+import { AmazonLogoutModal } from "./modals/AmazonLogoutModal";
+import { PropertyMigrationModal } from "./modals/PropertyMigrationModal";
+import { SyncProgressModal } from "./modals/SyncProgressModal";
+import { KindleApiService } from "./services/kindle-api";
 import { fetchBookMetadata } from "./services/metadata-service";
-import { renderTemplate } from "./services/template-renderer";
+import {
+	DEFAULT_PROPERTY_NAMES,
+	PropertyNames,
+	validatePropertyNames,
+} from "./services/note-properties";
+import {
+	normalizeOutputDirectory,
+	saveBookNotes,
+} from "./services/note-writer";
+import {
+	MigrationPreview,
+	previewMigration,
+	runMigration,
+} from "./services/property-migration";
+import { createVaultIO } from "./services/vault-io";
 import {
 	DEFAULT_SETTINGS,
 	KindleHighlightsSettings,
@@ -15,298 +29,270 @@ import {
 
 export default class KindleHighlightsPlugin extends Plugin {
 	settings: KindleHighlightsSettings;
-	kindleApiService: KindleApiService; // Add service instance member
-
+	kindleApiService: KindleApiService;
+	private busy = false;
+	private disposed = false;
+	private previews = new WeakMap<MigrationPreview, string>();
+	lastSyncResult: Awaited<ReturnType<typeof saveBookNotes>> | undefined;
+	private propertyConfig() {
+		return JSON.stringify([
+			this.settings.outputDirectory,
+			this.settings.propertyNames,
+			this.settings.propertyNameHistory,
+		]);
+	}
 	async onload() {
-		await loadTranslations(); // Load translations
+		await loadTranslations();
 		await this.loadSettings();
-		this.kindleApiService = new KindleApiService(this.app); // Instantiate the service
-
+		this.kindleApiService = new KindleApiService(
+			this.app,
+			this.settings.amazonSessionSecrets,
+			() => this.saveSettings(),
+		);
 		this.addCommand({
 			id: "sync-kindle-highlights",
 			name: t("commands.syncKindleHighlights.name"),
 			callback: () => this.syncHighlights(),
 		});
-
 		this.addCommand({
 			id: "logout-kindle",
 			name: t("commands.logoutKindle.name"),
 			callback: () => {
-				new AmazonLogoutModal(
-					this.app,
-					this.kindleApiService,
-					this.settings.amazonRegion
+				if (this.busy) {
+					new Notice(t("sync.busy"));
+					return;
+				}
+				new AmazonLogoutModal(this.app, () =>
+					this.logoutAmazon(this.settings.amazonRegion),
 				).open();
 			},
 		});
-
-		this.addSettingTab(new KindleHighlightsSettingTab(this.app, this));
-	}
-
-	onunload() {
-		// Plugin cleanup
-	}
-
-	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData()
-		);
-
+		this.addCommand({
+			id: "migrate-kindle-properties",
+			name: t("migration.title"),
+			callback: () => this.showPropertyMigration(),
+		});
 		this.addRibbonIcon(
 			"download",
 			t("ribbon.syncKindleHighlights.tooltip"),
-			() => this.syncHighlights()
+			() => this.syncHighlights(),
 		);
+		this.addSettingTab(new KindleHighlightsSettingTab(this.app, this));
 	}
-
+	onunload() {
+		this.disposed = true;
+		this.kindleApiService?.dispose();
+	}
+	async loadSettings() {
+		const saved = (await this.loadData()) ?? {};
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			...saved,
+			propertyNames: {
+				...DEFAULT_PROPERTY_NAMES,
+				...saved.propertyNames,
+			},
+			propertyNameHistory: Array.isArray(saved.propertyNameHistory)
+				? saved.propertyNameHistory
+				: [],
+			amazonSessionSecrets: { ...saved.amazonSessionSecrets },
+		};
+		validatePropertyNames(this.settings.propertyNames);
+	}
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
-
-	async syncHighlights() {
-		const emitter = new EventEmitter();
-		const progressModal = new SyncProgressModal(this.app, emitter);
-		progressModal.open();
-
+	async changePropertyNames(next: PropertyNames) {
+		validatePropertyNames(next);
+		if (this.busy) throw new Error(t("sync.busy"));
+		const old = { ...this.settings.propertyNames };
+		if (JSON.stringify(old) === JSON.stringify(next)) return;
+		// A previous key cannot become a different field: that would corrupt old notes.
+		for (const field of Object.keys(next) as (keyof PropertyNames)[])
+			for (const previous of [
+				...this.settings.propertyNameHistory,
+				old,
+			]) {
+				if (
+					Object.keys(previous).some(
+						(other) =>
+							other !== field &&
+							previous[other as keyof PropertyNames] ===
+								next[field],
+					)
+				)
+					throw new Error(t("migration.invalidNames"));
+			}
+		const history = [old, ...this.settings.propertyNameHistory].filter(
+			(m, i, a) =>
+				a.findIndex((n) => JSON.stringify(n) === JSON.stringify(m)) ===
+				i,
+		);
+		this.settings.propertyNames = { ...next };
+		this.settings.propertyNameHistory = history;
+		await this.saveSettings();
+	}
+	async logoutAmazon(region: string) {
+		if (this.busy) throw new Error(t("sync.busy"));
+		this.busy = true;
 		try {
-			// Progress modal handles initial messages
-
-			// --- Step 1: Authentication (Check & Trigger) ---
-			let isLoggedIn = this.kindleApiService.isLoggedIn();
-
-			if (!isLoggedIn) {
-				new Notice(t("sync.sessionNotFound")); // Still useful to notify before modal might show login
-				const loginSuccess = await this.kindleApiService.login(
-					this.settings.amazonRegion
-				);
-				if (!loginSuccess) {
-					new Notice(t("sync.loginCancelledOrFailed"));
-					emitter.emit("error", t("sync.loginCancelledOrFailed")); // Notify modal too
-					return; // Stop sync if login doesn't succeed
-				}
-				isLoggedIn = this.kindleApiService.isLoggedIn();
-			}
-
-			if (!isLoggedIn) {
-				new Notice(t("sync.loginRequired"));
-				emitter.emit("error", t("sync.loginRequired"));
-				return;
-			}
-
-			// Fetching highlights notice is handled by modal/emitter
-
-			// --- Step 2: Fetch Highlights ---
-			const { books, highlights } =
-				await this.kindleApiService.fetchHighlights(
-					this.settings.amazonRegion,
-					emitter // Pass emitter
-				);
-
-			// Emit 'start' after fetching books to know the total count
-			emitter.emit("start", books.length);
-
-			// Found books and highlights notice is handled by modal/emitter
-
-			if (this.settings.downloadMetadata) {
-				await this.enrichBooksWithMetadata(books);
-			}
-
-			await this.ensureOutputDirectory();
-			await this.saveHighlightsAsNotes(books, highlights, emitter);
-
-			emitter.emit("end");
-			// Completion notice is handled by modal
-		} catch (error) {
-			console.error("Error syncing Kindle highlights:", error);
-			emitter.emit("error", error.message || t("sync.unknownError")); // Use translated unknownError
+			await this.kindleApiService.logout(region);
+		} finally {
+			this.busy = false;
 		}
 	}
-
-	private async enrichBooksWithMetadata(books: Book[]): Promise<void> {
-		if (!this.settings.downloadMetadata) {
-			console.log(
-				"Skipping metadata enrichment as it's disabled in settings."
-			);
+	async loginAmazon() {
+		if (this.busy) {
+			new Notice(t("sync.busy"));
 			return;
 		}
-
-		console.log(`Enriching metadata for ${books.length} books...`);
-		for (const book of books) {
-			try {
-				const metadata = await fetchBookMetadata(
-					book,
-					this.settings.amazonRegion,
-					this.settings.downloadMetadata
-				);
-				book.metadata = metadata;
-				if (metadata.imageUrl) {
-					book.imageUrl = metadata.imageUrl;
-				}
-			} catch (error) {
-				console.warn(
-					`Failed to fetch metadata for book ${book.title}:`,
-					error
-				);
-			}
-		}
-	}
-
-	private async ensureOutputDirectory(): Promise<void> {
-		const outputDir = this.settings.outputDirectory;
-		if (!outputDir) return;
-
-		const dirExists = await this.app.vault.adapter.exists(outputDir);
-		if (!dirExists) {
-			await this.app.vault.createFolder(outputDir);
-		}
-	}
-
-	private async saveHighlightsAsNotes(
-		books: Book[],
-		highlights: Highlight[],
-		emitter: EventEmitter
-	): Promise<void> {
-		for (const book of books) {
-			const currentBookIndex = books.findIndex((b) => b.id === book.id);
-			const booksProcessedCount = currentBookIndex;
-
-			emitter.emit("book:start", {
-				bookTitle: book.title,
-				booksProcessedCount: booksProcessedCount,
-				totalBookCount: books.length,
-			});
-
-			const bookHighlights = highlights.filter(
-				(h) => h.bookId === book.id
+		this.busy = true;
+		try {
+			new Notice(
+				(await this.kindleApiService.login(this.settings.amazonRegion))
+					? t("modals.amazonLogin.success")
+					: t("sync.loginCancelledOrFailed"),
 			);
-
-			if (bookHighlights.length === 0) {
-				emitter.emit("book:end", {
-					bookTitle: book.title,
-					booksProcessedCount: booksProcessedCount + 1,
-					totalBookCount: books.length,
-				});
-				continue;
-			}
-
-			const highlightItems: string[] = [];
-			let highlightsProcessedCountForBook = 0;
-
-			for (const highlight of bookHighlights) {
-				highlightsProcessedCountForBook++;
-
-				emitter.emit("progress", {
-					bookTitle: book.title,
-					booksProcessedCount: booksProcessedCount,
-					totalBookCount: books.length,
-					highlightsProcessedCountForBook:
-						highlightsProcessedCountForBook,
-					currentHighlightText: highlight.text,
-				});
-
-				let appLink = `kindle://book?action=open&asin=${book.asin}`;
-				if (highlight.location) {
-					appLink += `&location=${highlight.location}`;
-				}
-
-				let item = `> ${highlight.text}\n> ${t(
-					"noteOutput.locationLabel"
-				)}: [${highlight.location}](${appLink})`;
-				if (highlight.note) {
-					item += `\n  - ${t("noteOutput.noteLabel")}: ${
-						highlight.note
-					}`;
-				}
-				highlightItems.push(`${item}\n`);
-			}
-
-			const highlightsString = highlightItems.join("\n");
-
-			emitter.emit("book:end", {
-				bookTitle: book.title,
-				booksProcessedCount: booksProcessedCount + 1,
-				totalBookCount: books.length,
-			});
-
-			const formattedLastAnnotatedDate = book.lastAnnotatedDate
-				? book.lastAnnotatedDate.toISOString().split("T")[0]
-				: undefined;
-
-			const context = {
-				book: book,
-				...book,
-				highlights: highlightsString,
-				highlightsCount: bookHighlights.length,
-				lastAnnotatedDate: formattedLastAnnotatedDate,
-				authorUrl: book.metadata?.authorUrl,
-				publicationDate: book.metadata?.publicationDate,
-				publisher: book.metadata?.publisher,
-				appLink: book.metadata?.appLink,
-			};
-
-			let content: string;
-			try {
-				content = renderTemplate(
-					this.settings.templateContent,
-					context
+		} catch {
+			new Notice(t("auth.failed"));
+		} finally {
+			this.busy = false;
+		}
+	}
+	async previewProperties(): Promise<MigrationPreview> {
+		if (this.busy) throw new Error(t("sync.busy"));
+		this.busy = true;
+		try {
+			const io = createVaultIO(this.app),
+				dir = normalizeOutputDirectory(this.settings.outputDirectory);
+			const paths = io
+				.list()
+				.filter((p) =>
+					dir ? p.startsWith(dir + "/") : !p.includes("/"),
 				);
-			} catch (error) {
-				console.error(
-					`Error rendering template for book "${book.title}":`,
-					error
+			const preview = await previewMigration(
+				paths,
+				io,
+				this.settings.propertyNames,
+				this.settings.propertyNameHistory,
+			);
+			this.previews.set(preview, this.propertyConfig());
+			return preview;
+		} finally {
+			this.busy = false;
+		}
+	}
+	async applyProperties(preview: MigrationPreview) {
+		if (this.busy) throw new Error(t("sync.busy"));
+		if (this.previews.get(preview) !== this.propertyConfig())
+			throw new Error("Unrecognized migration preview");
+		this.previews.delete(preview);
+		this.busy = true;
+		try {
+			const directory = `${this.app.vault.configDir}/plugins/${this.manifest.id}/backups/${new Date().toISOString().replace(/[:.]/g, "-")}`;
+			return await runMigration(
+				preview,
+				createVaultIO(this.app),
+				directory,
+			);
+		} finally {
+			this.busy = false;
+		}
+	}
+	async showPropertyMigration() {
+		try {
+			const preview = await this.previewProperties();
+			new PropertyMigrationModal(this.app, preview, (p) =>
+				this.applyProperties(p),
+			).open();
+		} catch {
+			new Notice(t("migration.failed"));
+		}
+	}
+	async syncHighlights() {
+		if (this.busy) {
+			new Notice(t("sync.busy"));
+			return;
+		}
+		this.busy = true;
+		const settings: KindleHighlightsSettings = JSON.parse(
+			JSON.stringify(this.settings),
+		);
+		const emitter = new EventEmitter();
+		const modal = new SyncProgressModal(this.app, emitter);
+		modal.open();
+		const showError = (message: string) => {
+			new Notice(message);
+			if (emitter.listenerCount("error")) emitter.emit("error", message);
+		};
+		try {
+			if (!(await this.kindleApiService.login(settings.amazonRegion))) {
+				showError(t("sync.loginCancelledOrFailed"));
+				return;
+			}
+			const { books, highlights, failedBooks } =
+				await this.kindleApiService.fetchHighlights(
+					settings.amazonRegion,
+					emitter,
 				);
-				new Notice(
-					t("sync.templateError", {
+			if (this.disposed) return;
+			if (settings.downloadMetadata)
+				for (const book of books) {
+					book.metadata = await fetchBookMetadata(
+						book,
+						settings.amazonRegion,
+						true,
+					);
+				}
+			if (this.disposed) return;
+			emitter.emit("start", { totalBookCount: books.length });
+			const result = await saveBookNotes(
+				createVaultIO(this.app, () => !this.disposed),
+				settings,
+				books,
+				highlights,
+				(book, index) => {
+					emitter.emit("book:start", {
 						bookTitle: book.title,
-						errorMessage: error.message || t("sync.unknownError"),
-					})
-				);
-				continue;
-			}
-
-			const fileName = `${book.title.replace(/[\\/:*?"<>|]/g, "_")}.md`;
-			let normalizedDir = this.settings.outputDirectory;
-			if (normalizedDir) {
-				normalizedDir = normalizedDir.replace(/^\/+|\/+$/g, "");
-			}
-			const filePath = normalizedDir
-				? `${normalizedDir}/${fileName}`
-				: fileName;
-
-			console.log(
-				`[Kindle Sync] Preparing to save/update file. Calculated filePath: "${filePath}"`
+						booksProcessedCount: index,
+						totalBookCount: books.length,
+					});
+				},
 			);
-
-			const fileExists = await this.app.vault.adapter.exists(filePath);
-			console.log(
-				`[Kindle Sync] File exists check for "${filePath}": ${fileExists}`
-			);
-
-			if (fileExists) {
-				const file = this.app.vault.getAbstractFileByPath(
-					filePath
-				) as TFile;
-				if (!file) {
-					console.error(
-						`[Kindle Sync] Error: File object is null for path "${filePath}" despite exists check returning true. Skipping modification.`
-					);
-					new Notice(
-						t("sync.fileProcessingError", { filePath: filePath })
-					);
-					continue;
-				}
-				await this.app.vault.modify(file, content);
-				console.log(
-					`[Kindle Sync] Successfully modified file: "${filePath}"`
+			result.failed += failedBooks;
+			this.lastSyncResult = result;
+			await this.kindleApiService.persist(settings.amazonRegion);
+			if (result.failed || result.held) {
+				showError(
+					t("sync.partial", {
+						failed: result.failed,
+						held: result.held,
+					}),
 				);
+				const report = new Modal(this.app);
+				report.titleEl.setText(
+					t("sync.partial", {
+						failed: result.failed,
+						held: result.held,
+					}),
+				);
+				for (const error of result.errors)
+					report.contentEl.createEl("p", { text: error });
+				report.open();
 			} else {
-				await this.app.vault.create(filePath, content);
-				console.log(
-					`[Kindle Sync] Successfully created file: "${filePath}"`
+				emitter.emit("end");
+				new Notice(
+					t("sync.summary", {
+						created: result.created,
+						updated: result.updated,
+						added: result.added,
+					}),
 				);
 			}
+		} catch {
+			showError(t("sync.safeFailure"));
+		} finally {
+			this.busy = false;
 		}
 	}
 }
