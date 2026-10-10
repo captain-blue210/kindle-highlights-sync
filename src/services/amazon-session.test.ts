@@ -580,3 +580,31 @@ it("keeps regional Continue navigation inside its owned window despite the host 
 	expect(externalPages).toEqual([]);
 	s.controller.dispose();
 });
+
+it.each([false, true])(
+	"settles cancellation when Electron listener cleanup throws (restored=%s)",
+	async (restored) => {
+		const s = setup(restored ? record() : undefined, "/vault/A", (w) => {
+			if (restored) w.loadURL = async () => new Promise<void>(() => {});
+		});
+		const pending = s.controller.ensureAuthenticated("co.jp");
+		await tick();
+		const w = s.windows[0];
+		w.webContents.removeListener = () => {
+			throw Error("Object has been destroyed");
+		};
+		w.destroyed = true;
+		// A real remote webContents becomes unusable during its destruction notification.
+		try {
+			w.emit("closed");
+		} catch {}
+		let settled = false;
+		void pending.then(() => {
+			settled = true;
+		});
+		await tick();
+		expect(settled).toBe(true);
+		expect(await pending).toBeNull();
+		s.controller.dispose();
+	},
+);

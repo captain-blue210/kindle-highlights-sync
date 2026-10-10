@@ -198,8 +198,13 @@ export function createAmazonSessionController(
 				clearInterval(lifecycle);
 				if (state.cancelPending === closed)
 					state.cancelPending = undefined;
-				window.webContents.removeListener("destroyed", closed);
-				window.removeListener("closed", closed);
+				try {
+					window.webContents.removeListener("destroyed", closed);
+					window.removeListener("closed", closed);
+				} catch {
+					// Electron remote objects may already be released on window destruction.
+					// Cleanup must never prevent the authentication promise from settling.
+				}
 				if (error) reject(error);
 				else resolve(result);
 			};
@@ -261,10 +266,22 @@ export function createAmazonSessionController(
 				clearInterval(lifecycle);
 				if (state.cancelPending === closed)
 					state.cancelPending = undefined;
-				window.webContents.removeListener("destroyed", closed);
-				window.removeListener("closed", closed);
-				window.webContents.removeListener("did-finish-load", loaded);
-				window.webContents.removeListener("did-fail-load", failed);
+				try {
+					window.webContents.removeListener("destroyed", closed);
+					window.removeListener("closed", closed);
+				} catch {
+					// Electron remote objects may already be released on window destruction.
+					// Cleanup must never prevent the authentication promise from settling.
+				}
+				try {
+					window.webContents.removeListener(
+						"did-finish-load",
+						loaded,
+					);
+					window.webContents.removeListener("did-fail-load", failed);
+				} catch {
+					// A destroyed webContents no longer has listeners to release.
+				}
 				if (error) reject(error);
 				else resolve(result);
 			};
