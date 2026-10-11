@@ -1,3 +1,4 @@
+import type {NoteDestinations} from "./services/note-destination";
 import { renderErrorRecord } from "./ui/sync-diagnostics";
 import type { SyncErrorRecord } from "./services/sync-progress";
 // settings.ts
@@ -28,6 +29,7 @@ const AMAZON_REGION_KEYS: string[] = [
 ];
 
 export interface KindleHighlightsSettings {
+	noteDestinations: NoteDestinations;
 	lastErrorRecord?: SyncErrorRecord;
 	outputDirectory: string;
 	templateContent: string;
@@ -39,6 +41,7 @@ export interface KindleHighlightsSettings {
 }
 
 export const DEFAULT_SETTINGS: KindleHighlightsSettings = {
+	noteDestinations: {},
 	outputDirectory: "Kindle Highlights",
 	templateContent: `---
 aliases:
@@ -130,6 +133,11 @@ export class KindleHighlightsSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}),
 			);
+
+        new Setting(containerEl)
+            .setName(t("destinations.title"))
+            .setDesc(t("destinations.description"))
+            .addButton(button => button.setButtonText(t("destinations.choose")).onClick(() => this.plugin.showNoteDestinations()));
 
 		new Setting(containerEl)
 			.setName(t("auth.title"))

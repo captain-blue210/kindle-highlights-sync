@@ -1,0 +1,4 @@
+
+.kindle-destination-group { margin: 1em 0; padding: 1em; border: 1px solid var(--background-modifier-border); border-radius: 6px; overflow-wrap: anywhere; }
+.kindle-destination-group label { display: flex; flex-direction: column; gap: .5em; }
+.kindle-destination-group select { max-width: 100%; }

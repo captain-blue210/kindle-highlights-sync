@@ -28,3 +28,10 @@ After conversion these notes are managed by this plugin. To synchronize them wit
 The sync dialog uses a centered animation, current phase and full book title, a slim progress bar, and compact completed/total, failed and review counts. The scrollable activity log records phase and book outcomes with elapsed intervals; its latest 250 entries can be copied. Fetching and saving are reported separately, including notes that need no changes. Closing the dialog allows sync and logging to continue. The bar counts processed books including failures and review holds; reaching 100% with issues is reported as a partial result. Books that need no changes count as completed. Results remain visible until closed.
 
 Settings retain the latest problematic sync, connection or logout operation with safe error details across restarts. Successful operations do not clear it; use the manual clear button in settings. Credentials, cookies and page content are excluded from diagnostics.
+
+
+### 重複ASINの同期先指定
+
+同じASINのノートが複数ある書籍は、同期先を指定するまで保留します。設定の「重複ASINの同期先」または同名のコマンドを開き、表示された候補パスから一つ選んで「指定先を保存」を押し、同期を再実行してください。選ばなかったノートは本文・プロパティとも変更しません。
+
+指定先はプラグイン設定に保存します。名前変更・削除・ASIN変更・ファイルの差し替えを検出した場合は指定を無効化し、再選択を求めます。名前変更を自動追従せず、残った別ノートへ自動で切り替えることもありません。指定先を元のパスへ戻しても、明示的に選び直してください。

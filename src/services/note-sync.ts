@@ -19,6 +19,8 @@ import {
 export const renderHighlight = renderAnnotation;
 export const mergeHighlights = reconcileAnnotations;
 export interface NoteSnapshot {
+	fileId?: string;
+	ctime?: number;
 	path: string;
 	content: string;
 }

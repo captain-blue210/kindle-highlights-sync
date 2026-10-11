@@ -188,6 +188,19 @@ function readRecord(
 				: undefined,
 	};
 }
+/** Destination discovery must not depend on optional/unrelated book metadata. */
+export function readNoteAsin(
+	content: string,
+	names: PropertyNames = DEFAULT_PROPERTY_NAMES,
+	history: PropertyNames[] = [],
+): string | undefined {
+	validatePropertyNames(names);
+	const { record } = parseNote(content);
+	const value = valuesFor(record, "asin", names, history)[0]?.value;
+	return typeof value === "string" || typeof value === "number"
+		? String(value)
+		: undefined;
+}
 export function readBookProperties(
 	content: string,
 	names: PropertyNames = DEFAULT_PROPERTY_NAMES,
