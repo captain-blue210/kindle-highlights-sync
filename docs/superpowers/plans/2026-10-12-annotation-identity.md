@@ -46,7 +46,7 @@
 **Files:** add `docs/issue-33-annotation-identity.md`; update plan checkboxes.
 - [x] Review complete diff and regression coverage; run `npm test`, `npx tsc --noEmit --skipLibCheck`, `npm run build`, `git diff --check`. Expected exits 0.
 - [x] Document Amazon evidence/limits, mapping recovery steps, #34 interfaces, atomicity and verification. Obtain fresh whole-branch review and resolve substantive findings with RED→GREEN.
-- [ ] Push branch, create PR with integration/format/hold details, attach PR. No merge.
+- [x] Push branch, create PR with integration/format/hold details, attach PR. No merge.
 
 ## Execution record
 
@@ -59,3 +59,5 @@
 - Fresh reviewer reviewed c08c758..c725574 and reproduced five Important findings. Code examples, open context append, fenced ledger replacement, selected-path ASIN race and mixed invalid ledgers each had RED tests and fixes; whole suite GREEN (201/201). No Critical or deferred Minor findings.
 - Author verification also caught custom legacy IDs without location and nonterminal sample IDs; RED→GREEN tests added. Legacy paragraph proof ignores surrounding separators so appending metadata does not invalidate the old block.
 - Review excluded live Amazon ID stability (#33 fallback avoids reliance), note-only extraction (#31), #34 UI/settings/integration and live-vault rendering. These are explicitly reported as unverified or deferred scope; merge remains gated on #34 integration.
+
+- PR created and attached: https://github.com/captain-blue210/kindle-highlights-sync/pull/37 (draft, main base, no merge). Dedicated worktree retained for #34 integration.
