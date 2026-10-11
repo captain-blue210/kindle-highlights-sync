@@ -573,6 +573,7 @@ describe("persisted explicit sync destinations", () => {
 		return {
 			list: () => [path],
 			identity: () => 10,
+			fileIdentity: () => "test-file",
 			read: async () => content,
 			process: vi.fn(),
 			create: vi.fn(),
@@ -581,17 +582,24 @@ describe("persisted explicit sync destinations", () => {
 	it("persists selection without touching a note and reloads it", async () => {
 		const p = plugin();
 		vi.mocked(createVaultIO).mockReturnValue(selectionIO() as any);
-		await p.selectNoteDestination("ABC", { path, ctime: 10, content });
+		await p.selectNoteDestination("ABC", {
+			path,
+			fileId: "test-file",
+			ctime: 10,
+			content,
+		});
 		expect(p.saveData).toHaveBeenLastCalledWith(
 			expect.objectContaining({
-				noteDestinations: { ABC: { path, ctime: 10 } },
+				noteDestinations: { ABC: { path, fileId: "test-file", ctime: 10 } },
 			}),
 		);
 		p.loadData = vi.fn(async () => ({
 			noteDestinations: JSON.parse(JSON.stringify(p.settings.noteDestinations)),
 		}));
 		await p.loadSettings();
-		expect(p.settings.noteDestinations).toEqual({ ABC: { path, ctime: 10 } });
+		expect(p.settings.noteDestinations).toEqual({
+			ABC: { path, fileId: "test-file", ctime: 10 },
+		});
 	});
 	it.each(["wrong-asin", "replaced", "removed"])(
 		"rejects a stale %s preview before persisting",
@@ -604,7 +612,12 @@ describe("persisted explicit sync destinations", () => {
 			if (kind === "removed") io.list = () => [];
 			vi.mocked(createVaultIO).mockReturnValue(io as any);
 			await expect(
-				p.selectNoteDestination("ABC", { path, ctime: 10, content }),
+				p.selectNoteDestination("ABC", {
+					path,
+					fileId: "test-file",
+					ctime: 10,
+					content,
+				}),
 			).rejects.toThrow();
 			expect(p.settings.noteDestinations).toEqual({});
 			expect(p.saveData).not.toHaveBeenCalled();
@@ -617,15 +630,20 @@ describe("persisted explicit sync destinations", () => {
 			throw Error("ENOSPC");
 		});
 		await expect(
-			p.selectNoteDestination("ABC", { path, ctime: 10, content }),
+			p.selectNoteDestination("ABC", {
+				path,
+				fileId: "test-file",
+				ctime: 10,
+				content,
+			}),
 		).rejects.toThrow();
 		expect(p.settings.noteDestinations).toEqual({});
 	});
 	it("invalidates renamed/deleted paths and folder descendants before saving settings", async () => {
 		const p = plugin();
 		p.settings.noteDestinations = {
-			ABC: { path, ctime: 10 },
-			OTHER: { path: "elsewhere/Other.md", ctime: 20 },
+			ABC: { path, fileId: "test-file", ctime: 10 },
+			OTHER: { path: "elsewhere/Other.md", fileId: "test-file", ctime: 20 },
 		};
 		const saving = p.invalidateDestinations("books", "renamed");
 		expect(p.settings.noteDestinations.ABC.invalidated).toBe("renamed");
@@ -648,7 +666,9 @@ it("persists detected destination invalidation and reports it as held in progres
 	const p = plugin(),
 		book = { id: "ABC", asin: "ABC", title: "Book" },
 		path = "books/A.md";
-	p.settings.noteDestinations = { ABC: { path, ctime: 10 } };
+	p.settings.noteDestinations = {
+		ABC: { path, fileId: "test-file", ctime: 10 },
+	};
 	vi.mocked(p.kindleApiService.fetchHighlights).mockResolvedValueOnce({
 		books: [book],
 		highlights: [],
@@ -688,7 +708,12 @@ it("persists detected destination invalidation and reports it as held in progres
 	expect(p.saveData).toHaveBeenCalledWith(
 		expect.objectContaining({
 			noteDestinations: {
-				ABC: { path, ctime: 10, invalidated: "identity-changed" },
+				ABC: {
+					path,
+					fileId: "test-file",
+					ctime: 10,
+					invalidated: "identity-changed",
+				},
 			},
 		}),
 	);
@@ -709,10 +734,13 @@ it("does not resurrect a failed provisional selection through another queued set
 	const p = plugin(),
 		path = "books/A.md",
 		content = "---\nASIN: ABC\nbookId: saved\ntitle: Book\n---\nMemo\n";
-	p.settings.noteDestinations = { OTHER: { path: "other/B.md", ctime: 20 } };
+	p.settings.noteDestinations = {
+		OTHER: { path: "other/B.md", fileId: "test-file", ctime: 20 },
+	};
 	vi.mocked(createVaultIO).mockReturnValue({
 		list: () => [path],
 		identity: () => 10,
+		fileIdentity: () => "test-file",
 		read: async () => content,
 	} as any);
 	let reject!: (e: Error) => void,
@@ -729,6 +757,7 @@ it("does not resurrect a failed provisional selection through another queued set
 	};
 	const selecting = p.selectNoteDestination("ABC", {
 		path,
+		fileId: "test-file",
 		ctime: 10,
 		content,
 	});
@@ -748,6 +777,7 @@ it("includes a successful selection in later queued settings saves", async () =>
 	vi.mocked(createVaultIO).mockReturnValue({
 		list: () => [path],
 		identity: () => 10,
+		fileIdentity: () => "test-file",
 		read: async () => content,
 	} as any);
 	let release!: () => void,
@@ -764,6 +794,7 @@ it("includes a successful selection in later queued settings saves", async () =>
 	};
 	const selecting = p.selectNoteDestination("ABC", {
 		path,
+		fileId: "test-file",
 		ctime: 10,
 		content,
 	});
@@ -772,7 +803,11 @@ it("includes a successful selection in later queued settings saves", async () =>
 	const later = p.saveSettings();
 	release();
 	await Promise.all([selecting, later]);
-	expect(disk.noteDestinations.ABC).toEqual({ path, ctime: 10 });
+	expect(disk.noteDestinations.ABC).toEqual({
+		path,
+		fileId: "test-file",
+		ctime: 10,
+	});
 	expect(disk.outputDirectory).toBe("changed");
 });
 it("invalidates a destination renamed while its selection is pending persistence", async () => {
@@ -782,6 +817,7 @@ it("invalidates a destination renamed while its selection is pending persistence
 	vi.mocked(createVaultIO).mockReturnValue({
 		list: () => [path],
 		identity: () => 10,
+		fileIdentity: () => "test-file",
 		read: async () => content,
 	} as any);
 	let release!: () => void,
@@ -798,6 +834,7 @@ it("invalidates a destination renamed while its selection is pending persistence
 	};
 	const selecting = p.selectNoteDestination("ABC", {
 		path,
+		fileId: "test-file",
 		ctime: 10,
 		content,
 	});
@@ -813,8 +850,8 @@ it("registers rename/delete handlers that invalidate selected notes and folder d
 	const p = plugin(),
 		handlers: Record<string, Function> = {};
 	p.settings.noteDestinations = {
-		ABC: { path: "books/A.md", ctime: 10 },
-		OTHER: { path: "other/B.md", ctime: 20 },
+		ABC: { path: "books/A.md", fileId: "test-file", ctime: 10 },
+		OTHER: { path: "other/B.md", fileId: "test-file", ctime: 20 },
 	};
 	p.loadData = vi.fn(async () => JSON.parse(JSON.stringify(p.settings)));
 	(p.app.vault as any).on = vi.fn((name: string, fn: Function) => {
@@ -834,8 +871,18 @@ it("registers rename/delete handlers that invalidate selected notes and folder d
 	expect(p.saveData).toHaveBeenLastCalledWith(
 		expect.objectContaining({
 			noteDestinations: {
-				ABC: { path: "books/A.md", ctime: 10, invalidated: "renamed" },
-				OTHER: { path: "other/B.md", ctime: 20, invalidated: "deleted" },
+				ABC: {
+					path: "books/A.md",
+					fileId: "test-file",
+					ctime: 10,
+					invalidated: "renamed",
+				},
+				OTHER: {
+					path: "other/B.md",
+					fileId: "test-file",
+					ctime: 20,
+					invalidated: "deleted",
+				},
 			},
 		}),
 	);

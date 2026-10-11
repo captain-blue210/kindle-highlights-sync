@@ -16,6 +16,7 @@ function memoryVault(initial: Record<string, string> = {}) {
 	const files = new Map(Object.entries(initial));
 	return {
 		files,
+		fileIdentity: () => "test-file",
 		list: () => Array.from(files.keys()),
 		read: async (p: string) => files.get(p)!,
 		create: async (p: string, s: string) => {
@@ -257,7 +258,7 @@ describe("explicit duplicate ASIN destinations", () => {
 	}
 	const selected = {
 		...config,
-		noteDestinations: { ABC: { path: a, ctime: 10 } },
+		noteDestinations: { ABC: { path: a, fileId: "test-file", ctime: 10 } },
 	};
 	it("holds unselected duplicates with all candidate paths and no completion", async () => {
 		const io = duplicateVault(),
@@ -397,7 +398,10 @@ it.each(["Note unavailable", "Note identity changed during synchronization"])(
 		};
 		const r = await saveBookNotes(
 			io,
-			{ ...config, noteDestinations: { ABC: { path, ctime: 10 } } },
+			{
+				...config,
+				noteDestinations: { ABC: { path, fileId: "test-file", ctime: 10 } },
+			},
 			[book],
 			[highlight],
 		);
@@ -416,7 +420,10 @@ it("holds malformed selected properties inside process", async () => {
 	};
 	const r = await saveBookNotes(
 		io,
-		{ ...config, noteDestinations: { ABC: { path, ctime: 10 } } },
+		{
+			...config,
+			noteDestinations: { ABC: { path, fileId: "test-file", ctime: 10 } },
+		},
 		[book],
 		[highlight],
 	);
@@ -436,7 +443,7 @@ it.each(["missing", "asin-changed"])(
 		};
 		const cfg = {
 			...config,
-			noteDestinations: { ABC: { path: a, ctime: 10 } },
+			noteDestinations: { ABC: { path: a, fileId: "test-file", ctime: 10 } },
 		};
 		if (kind === "missing") io.files.delete(a);
 		else io.files.set(a, source.replace("ASIN: ABC", "ASIN: OTHER"));
@@ -448,7 +455,7 @@ it.each(["missing", "asin-changed"])(
 		expect(io.files.get(b)).toBe(source);
 		const reselected = {
 			...config,
-			noteDestinations: { ABC: { path: a, ctime: 10 } },
+			noteDestinations: { ABC: { path: a, fileId: "test-file", ctime: 10 } },
 		};
 		expect(
 			(await saveBookNotes(io, reselected, [book], [highlight])).added,
@@ -466,7 +473,10 @@ it("updates an explicitly selected ASIN-only note and leaves the complete altern
 		identity: () => 10,
 	};
 	expect((await saveBookNotes(io, config, [book], [highlight])).held).toBe(1);
-	const cfg = { ...config, noteDestinations: { ABC: { path: a, ctime: 10 } } };
+	const cfg = {
+		...config,
+		noteDestinations: { ABC: { path: a, fileId: "test-file", ctime: 10 } },
+	};
 	expect((await saveBookNotes(io, cfg, [book], [highlight])).added).toBe(1);
 	expect(io.files.get(a)).toContain("My memo [[Link]]");
 	expect(io.files.get(b)).toBe(full);
@@ -483,7 +493,10 @@ it("holds a selected file that disappears while its snapshot is being read", asy
 	};
 	const result = await saveBookNotes(
 		io,
-		{ ...config, noteDestinations: { ABC: { path, ctime: 10 } } },
+		{
+			...config,
+			noteDestinations: { ABC: { path, fileId: "test-file", ctime: 10 } },
+		},
 		[book],
 		[highlight],
 	);

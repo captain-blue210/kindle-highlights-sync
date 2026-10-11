@@ -385,6 +385,11 @@ export default class KindleHighlightsPlugin extends Plugin {
 			)
 				throw new Error("Destination preview is stale");
 			const ctime = io.identity?.(path);
+			const fileId = io.fileIdentity?.(path);
+			if (!fileId || fileId !== candidate.fileId)
+				throw new Error(
+					"Desktop vault filesystem identity unavailable",
+				);
 			if (
 				!ctime ||
 				!Number.isFinite(ctime) ||
@@ -396,6 +401,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 			if (
 				this.disposed ||
 				io.identity?.(path) !== ctime ||
+				io.fileIdentity?.(path) !== fileId ||
 				noteAsin(
 					{ path, content },
 					this.settings.propertyNames,
@@ -403,7 +409,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 				) !== asin
 			)
 				throw new Error("Destination preview is stale");
-			const selection: NoteDestination = { path, ctime };
+			const selection: NoteDestination = { path, ctime, fileId };
 			const pending = { asin, selection };
 			this.pendingDestination = pending;
 			await this.saveSettings(pending);
@@ -432,6 +438,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 				notes.push({
 					path,
 					ctime: io.identity?.(path),
+					fileId: io.fileIdentity?.(path),
 					content: await io.read(path),
 				});
 			}
@@ -446,7 +453,10 @@ export default class KindleHighlightsPlugin extends Plugin {
 					),
 					async (asin, note) => {
 						// The preview's IO retains the original TFile pin, including same-ctime replacements.
-						if (io.identity?.(note.path) !== note.ctime)
+						if (
+							io.identity?.(note.path) !== note.ctime ||
+							io.fileIdentity?.(note.path) !== note.fileId
+						)
 							throw new Error("Destination preview is stale");
 						await this.selectNoteDestination(asin, note);
 					},

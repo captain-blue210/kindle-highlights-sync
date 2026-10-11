@@ -25,6 +25,8 @@ import { renderTemplate } from "./template-renderer";
 export interface NoteWriterIO {
 	/** Stable creation time; explicit selections require this capability. */
 	identity?(path: string): number | undefined;
+	/** Desktop filesystem identity, independent of user-preserved timestamps. */
+	fileIdentity?(path: string): string | undefined;
 	list(): string[];
 	read(path: string): Promise<string>;
 	create(path: string, content: string): Promise<void>;
@@ -103,6 +105,7 @@ export async function saveBookNotes(
 			notes.push({
 				path,
 				ctime: io.identity?.(path),
+				fileId: io.fileIdentity?.(path),
 				content: await io.read(path),
 			});
 		} catch {
@@ -168,6 +171,7 @@ export async function saveBookNotes(
 									path: existing.path,
 									content: current,
 									ctime: io.identity?.(existing.path),
+									fileId: io.fileIdentity?.(existing.path),
 								},
 							],
 							book,

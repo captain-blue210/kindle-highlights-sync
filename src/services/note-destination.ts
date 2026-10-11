@@ -9,6 +9,7 @@ import { findExistingNote, NoteSnapshot } from "./note-sync";
 export type DestinationInvalidation =
 	"renamed" | "deleted" | "missing" | "identity-changed" | "invalid";
 export interface NoteDestination {
+	fileId?: string;
 	path: string;
 	ctime: number | null;
 	invalidated?: DestinationInvalidation;
@@ -49,10 +50,13 @@ export function readNoteDestinations(value: unknown): NoteDestinations {
 			v.path.endsWith(".md") &&
 			typeof v.ctime === "number" &&
 			Number.isFinite(v.ctime) &&
-			v.ctime > 0;
+			v.ctime > 0 &&
+			typeof v.fileId === "string" &&
+			!!v.fileId;
 		result[asin] = valid
 			? {
 					path: v.path!,
+					fileId: v.fileId!,
 					ctime: v.ctime!,
 					...(v.invalidated
 						? {
@@ -140,7 +144,10 @@ export function resolveNoteDestination(
 		if (!note) return hold("destination-missing");
 		if (
 			!selected.ctime ||
+			!selected.fileId ||
 			note.ctime !== selected.ctime ||
+			(selected.fileId !== undefined &&
+				note.fileId !== selected.fileId) ||
 			noteAsin(note, names, history) !== book.asin
 		)
 			return hold("destination-identity-changed");

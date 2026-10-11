@@ -1,3 +1,5 @@
+import { statSync } from "fs";
+import { join } from "path";
 import { App, TFile } from "obsidian";
 import type { MigrationIO } from "./property-migration";
 import type { NoteWriterIO } from "./note-writer";
@@ -33,6 +35,23 @@ export function createVaultIO(
 		return current;
 	};
 	return {
+		fileIdentity: (path) => {
+			try {
+				pinnedFile(path);
+				const adapter = app.vault
+					.adapter as typeof app.vault.adapter & {
+					getBasePath?: () => string;
+				};
+				const base = adapter.getBasePath?.();
+				if (!base) return undefined;
+				const stat = statSync(join(base, path), { bigint: true });
+				if (!stat.isFile() || stat.ino.toString() === "0")
+					return undefined;
+				return `${stat.dev}:${stat.ino}:${stat.birthtimeNs}`;
+			} catch {
+				return undefined;
+			}
+		},
 		identity: (path) => {
 			try {
 				return pinnedFile(path).stat.ctime;
