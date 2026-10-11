@@ -88,3 +88,56 @@ it("blocks writes if an existing note cannot be read for identity matching", asy
 	expect(result.created).toBe(0);
 	expect(io.files.size).toBe(1);
 });
+
+it("reports each ASIN's save outcome separately, including empty new books", async () => {
+	const io = memoryVault({
+		"books/B.md":
+			"---\nASIN: HELD\nbookId: saved\ntitle: Held\n---\n> Hand edited\n> [10](kindle://book?action=open&asin=HELD&location=10)\n",
+		"books/Failed.md": "Unrelated memo",
+	});
+	const result = await saveBookNotes(
+		io,
+		config,
+		[
+			book,
+			{ id: "HELD", asin: "HELD", title: "Held" },
+			{ id: "FAILED", asin: "FAILED", title: "Failed" },
+			{ id: "EMPTY", asin: "EMPTY", title: "Empty" },
+		],
+		[
+			highlight,
+			{ ...highlight, bookId: "HELD" },
+			{ ...highlight, bookId: "FAILED" },
+		],
+	);
+	expect(result.outcomes).toMatchObject([
+		{ asin: "ABC", status: "created", path: "books/Renamed Book.md" },
+		{ asin: "HELD", status: "held", path: "books/B.md" },
+		{ asin: "FAILED", status: "failed" },
+		{ asin: "EMPTY", status: "skipped-no-highlights" },
+	]);
+});
+
+it("retains links, old anchors, personal notes and the renamed path on two consecutive saves", async () => {
+	const source =
+		'---\nbookId: "saved"\ntitle: Original\nASIN: ABC\n---\n\n> [[Related]] Edited abc ^ref-19495\n\nPersonal memo [[Other]]\n';
+	const io = memoryVault({ "books/My renamed book.md": source });
+	const highlights = [
+		highlight,
+		{ id: "new", bookId: "ABC", text: "new highlight", location: "20" },
+	];
+	const first = await saveBookNotes(io, config, [book], highlights);
+	const afterFirst = io.files.get("books/My renamed book.md")!;
+	const second = await saveBookNotes(io, config, [book], highlights);
+	expect(first.added).toBe(1);
+	expect(second.added).toBe(0);
+	expect(splitNote(afterFirst).body.startsWith(splitNote(source).body)).toBe(
+		true,
+	);
+	expect(io.files.get("books/My renamed book.md")).toBe(afterFirst);
+	expect(Array.from(io.files.keys())).toEqual(["books/My renamed book.md"]);
+	expect(readBookProperties(afterFirst)!.bookId).toBe("saved");
+	expect(second.outcomes).toMatchObject([
+		{ asin: "ABC", status: "updated", path: "books/My renamed book.md" },
+	]);
+});

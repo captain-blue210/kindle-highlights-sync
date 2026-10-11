@@ -4,7 +4,7 @@ import { loadTranslations, t } from "./i18n";
 import { AmazonLogoutModal } from "./modals/AmazonLogoutModal";
 import { PropertyMigrationModal } from "./modals/PropertyMigrationModal";
 import { SyncProgressModal } from "./modals/SyncProgressModal";
-import { KindleApiService } from "./services/kindle-api";
+import { FetchDiagnostics, KindleApiService } from "./services/kindle-api";
 import { fetchBookMetadata } from "./services/metadata-service";
 import {
 	DEFAULT_PROPERTY_NAMES,
@@ -34,6 +34,17 @@ export default class KindleHighlightsPlugin extends Plugin {
 	private disposed = false;
 	private previews = new WeakMap<MigrationPreview, string>();
 	lastSyncResult: Awaited<ReturnType<typeof saveBookNotes>> | undefined;
+	lastSyncDiagnostics:
+		| {
+				schemaVersion: 1;
+				startedAt: string;
+				finishedAt?: string;
+				region: string;
+				status: "complete" | "partial" | "failed" | "login-cancelled";
+				fetch?: FetchDiagnostics;
+				noteSave?: Awaited<ReturnType<typeof saveBookNotes>>;
+		  }
+		| undefined;
 	private propertyConfig() {
 		return JSON.stringify([
 			this.settings.outputDirectory,
@@ -218,6 +229,17 @@ export default class KindleHighlightsPlugin extends Plugin {
 		const settings: KindleHighlightsSettings = JSON.parse(
 			JSON.stringify(this.settings),
 		);
+		this.lastSyncResult = undefined;
+		const diagnostics: NonNullable<
+			KindleHighlightsPlugin["lastSyncDiagnostics"]
+		> = {
+			schemaVersion: 1,
+			startedAt: new Date().toISOString(),
+			region: settings.amazonRegion,
+			status: "failed",
+		};
+		this.lastSyncDiagnostics = diagnostics;
+		let fetchStarted = false;
 		const emitter = new EventEmitter();
 		const modal = new SyncProgressModal(this.app, emitter);
 		modal.open();
@@ -227,9 +249,11 @@ export default class KindleHighlightsPlugin extends Plugin {
 		};
 		try {
 			if (!(await this.kindleApiService.login(settings.amazonRegion))) {
+				diagnostics.status = "login-cancelled";
 				showError(t("sync.loginCancelledOrFailed"));
 				return;
 			}
+			fetchStarted = true;
 			const { books, highlights, failedBooks } =
 				await this.kindleApiService.fetchHighlights(
 					settings.amazonRegion,
@@ -259,10 +283,20 @@ export default class KindleHighlightsPlugin extends Plugin {
 					});
 				},
 			);
-			result.failed += failedBooks;
+			diagnostics.noteSave = JSON.parse(JSON.stringify(result));
+			const exclusions =
+				this.kindleApiService.lastFetchDiagnostics?.excludedRows.filter(
+					(row) => row.reason !== "duplicate-asin",
+				) ?? [];
+			result.failed += failedBooks + exclusions.length;
+			for (const row of exclusions)
+				result.errors.push(
+					`Notebook row ${row.row}${row.asin ? ` (ASIN: ${row.asin})` : ""}: ${row.reason}`,
+				);
 			this.lastSyncResult = result;
 			await this.kindleApiService.persist(settings.amazonRegion);
 			if (result.failed || result.held) {
+				diagnostics.status = "partial";
 				showError(
 					t("sync.partial", {
 						failed: result.failed,
@@ -280,6 +314,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 					report.contentEl.createEl("p", { text: error });
 				report.open();
 			} else {
+				diagnostics.status = "complete";
 				emitter.emit("end");
 				new Notice(
 					t("sync.summary", {
@@ -290,8 +325,37 @@ export default class KindleHighlightsPlugin extends Plugin {
 				);
 			}
 		} catch {
-			showError(t("sync.safeFailure"));
+			const state = fetchStarted
+				? this.kindleApiService.lastFetchDiagnostics?.library.status
+				: undefined;
+			showError(
+				t(
+					state === "unconfirmed"
+						? "sync.libraryUnconfirmed"
+						: state === "load-failed"
+							? "sync.libraryLoadFailed"
+							: "sync.safeFailure",
+				),
+			);
 		} finally {
+			if (fetchStarted)
+				diagnostics.fetch = this.kindleApiService.lastFetchDiagnostics;
+			diagnostics.finishedAt = new Date().toISOString();
+			try {
+				const directory = `${this.app.vault.configDir}/plugins/${this.manifest.id}/diagnostics`;
+				const adapter = this.app.vault.adapter;
+				if (!(await adapter.exists(directory)))
+					await adapter.mkdir(directory);
+				await adapter.write(
+					`${directory}/${diagnostics.startedAt.replace(/[:.]/g, "-")}.json`,
+					JSON.stringify(diagnostics, null, 2) + "\n",
+				);
+			} catch {
+				console.error(
+					"Kindle sync diagnostics could not be saved; retained in lastSyncDiagnostics",
+				);
+				new Notice(t("sync.diagnosticsWriteFailed"));
+			}
 			this.busy = false;
 		}
 	}

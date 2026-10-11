@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+const { summaryOpen } = vi.hoisted(() => ({ summaryOpen: vi.fn() }));
 vi.mock("obsidian", () => ({
 	Plugin: class {},
-	Modal: class {},
+	Modal: class {
+		titleEl = { setText: vi.fn() };
+		contentEl = { createEl: vi.fn() };
+		open = summaryOpen;
+	},
 	Notice: vi.fn(),
 }));
 vi.mock("./i18n", () => ({
@@ -14,7 +19,11 @@ vi.mock("./settings", () => ({
 }));
 vi.mock("./modals/AmazonLogoutModal", () => ({ AmazonLogoutModal: class {} }));
 vi.mock("./modals/PropertyMigrationModal", () => ({
-	PropertyMigrationModal: class {},
+	PropertyMigrationModal: class {
+		titleEl = { setText: vi.fn() };
+		contentEl = { createEl: vi.fn() };
+		open = summaryOpen;
+	},
 }));
 vi.mock("./modals/SyncProgressModal", () => ({
 	SyncProgressModal: class {
@@ -34,11 +43,27 @@ vi.mock("./services/note-writer", () => ({
 		errors: [],
 	})),
 }));
+import { Notice } from "obsidian";
 import Plugin from "./main";
 import { saveBookNotes } from "./services/note-writer";
 import { DEFAULT_PROPERTY_NAMES } from "./services/note-properties";
 function plugin() {
 	const p = new Plugin({} as any, {} as any);
+	const files = new Map<string, string>();
+	(p as any).app = {
+		vault: {
+			configDir: ".obsidian",
+			adapter: {
+				exists: async () => true,
+				mkdir: async () => {},
+				write: async (path: string, content: string) => {
+					files.set(path, content);
+				},
+			},
+		},
+	};
+	(p as any).manifest = { id: "kindle-highlights-sync" };
+	(p as any).reportFiles = files;
 	p.settings = {
 		amazonRegion: "co.jp",
 		downloadMetadata: false,
@@ -100,4 +125,76 @@ describe("plugin transaction boundaries", () => {
 		finish();
 		await loggingOut;
 	});
+});
+
+it("persists ASIN diagnostics with separate fetch and note-save failures", async () => {
+	const p = plugin();
+	const fetchDiagnostics = {
+		region: "co.jp",
+		startedAt: "2026-10-11T03:00:00Z",
+		library: { status: "complete", snapshots: [] },
+		notebookAsins: ["OK", "FETCH_FAILED"],
+		parsedAsins: ["OK", "FETCH_FAILED"],
+		excludedRows: [],
+		fetchedAsins: ["OK"],
+		failedAnnotations: [
+			{ asin: "FETCH_FAILED", reason: "annotation-fetch-failed" },
+		],
+	};
+	p.kindleApiService.lastFetchDiagnostics = fetchDiagnostics as any;
+	vi.mocked(p.kindleApiService.fetchHighlights).mockResolvedValue({
+		books: [],
+		highlights: [],
+		failedBooks: 1,
+	});
+	vi.mocked(saveBookNotes).mockResolvedValueOnce({
+		created: 0,
+		updated: 0,
+		added: 0,
+		held: 0,
+		failed: 1,
+		errors: [],
+		outcomes: [
+			{ asin: "OK", status: "failed", reason: "duplicate-note-asin" },
+		],
+	} as any);
+	await p.syncHighlights();
+	const files = (p as any).reportFiles as Map<string, string>;
+	expect(files.size).toBe(1);
+	expect([...files.keys()][0]).toMatch(
+		/^\.obsidian\/plugins\/kindle-highlights-sync\/diagnostics\/.+\.json$/,
+	);
+	const report = JSON.parse([...files.values()][0]);
+	expect(report.fetch.failedAnnotations).toEqual([
+		{ asin: "FETCH_FAILED", reason: "annotation-fetch-failed" },
+	]);
+	expect(report.noteSave.failed).toBe(1);
+	expect(report.noteSave.outcomes).toMatchObject([
+		{ asin: "OK", status: "failed" },
+	]);
+	expect(report.status).toBe("partial");
+	expect(p.lastSyncResult?.failed).toBe(2);
+	expect(summaryOpen).toHaveBeenCalledOnce();
+	expect(Notice).not.toHaveBeenCalledWith("sync.safeFailure");
+});
+
+it("preserves an incomplete-library report and never writes notes", async () => {
+	const p = plugin();
+	p.kindleApiService.lastFetchDiagnostics = {
+		library: { status: "unconfirmed", snapshots: [] },
+		notebookAsins: ["ABC"],
+		parsedAsins: ["ABC"],
+		excludedRows: [],
+		fetchedAsins: [],
+		failedAnnotations: [],
+	} as any;
+	vi.mocked(p.kindleApiService.fetchHighlights).mockRejectedValue(
+		Error("incomplete"),
+	);
+	await p.syncHighlights();
+	expect(saveBookNotes).not.toHaveBeenCalled();
+	const report = JSON.parse([...(p as any).reportFiles.values()][0]);
+	expect(report.fetch.library.status).toBe("unconfirmed");
+	expect(report.noteSave).toBeUndefined();
+	expect(report.status).toBe("failed");
 });

@@ -26,6 +26,12 @@ export interface NoteWriterSettings {
 	propertyNames: PropertyNames;
 	propertyNameHistory: PropertyNames[];
 }
+export interface NoteSaveOutcome {
+	asin: string;
+	status: "created" | "updated" | "held" | "failed" | "skipped-no-highlights";
+	path?: string;
+	reason?: string;
+}
 export function normalizeOutputDirectory(path: string): string {
 	const normalized = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 	if (
@@ -61,6 +67,7 @@ export async function saveBookNotes(
 		held: 0,
 		failed: 0,
 		errors: [] as string[],
+		outcomes: [] as NoteSaveOutcome[],
 	};
 	for (const path of paths) {
 		try {
@@ -72,6 +79,11 @@ export async function saveBookNotes(
 	// Missing an identity scan could create a duplicate of a renamed unreadable note.
 	if (result.errors.length) {
 		result.failed = Math.max(books.length, result.errors.length);
+		result.outcomes = books.map((book) => ({
+			asin: book.asin,
+			status: "failed",
+			reason: "identity-scan-failed",
+		}));
 		return result;
 	}
 	for (const [index, book] of books.entries()) {
@@ -115,15 +127,32 @@ export async function saveBookNotes(
 				});
 				if (warnings.length) {
 					result.held++;
+					result.outcomes.push({
+						asin: book.asin,
+						status: "held",
+						path: existing.path,
+						reason: warnings.join("; "),
+					});
 					result.errors.push(
 						`${existing.path}: ${warnings.join("; ")}`,
 					);
 				} else {
 					result.updated++;
+					result.outcomes.push({
+						asin: book.asin,
+						status: "updated",
+						path: existing.path,
+					});
 					result.added += added;
 				}
 			} else {
-				if (!bookHighlights.length) continue;
+				if (!bookHighlights.length) {
+					result.outcomes.push({
+						asin: book.asin,
+						status: "skipped-no-highlights",
+					});
+					continue;
+				}
 				if (
 					notes.some(
 						(n) =>
@@ -168,10 +197,24 @@ export async function saveBookNotes(
 				await io.create(path, content);
 				notes.push({ path, content });
 				result.created++;
+				result.outcomes.push({
+					asin: book.asin,
+					status: "created",
+					path,
+				});
 				result.added += bookHighlights.length;
 			}
-		} catch {
+		} catch (error) {
 			result.failed++;
+			result.outcomes.push({
+				asin: book.asin,
+				status: "failed",
+				reason:
+					error instanceof Error &&
+					error.message === "Multiple notes have the same ASIN"
+						? "duplicate-note-asin"
+						: "note-save-failed",
+			});
 			result.errors.push(
 				`${book.title}: note could not be safely updated`,
 			);
