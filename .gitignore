@@ -23,3 +23,6 @@ data.json
 
 # Exclude test vault
 plugin-test
+
+# Local account diagnostic records
+diagnostics-local/

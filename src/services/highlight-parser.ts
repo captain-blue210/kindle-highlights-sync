@@ -16,9 +16,15 @@ const HIGHLIGHT_NOTE_SELECTOR = "#note"; // ID for note text span
 const HIGHLIGHT_LOCATION_SELECTOR = "#kp-annotation-location"; // ID for hidden input with location value
 const HIGHLIGHT_COLOR_SELECTOR = ".kp-notebook-highlight"; // Class on the highlight span indicating color
 
+export type ExcludedBookRow = {
+	row: number;
+	asin?: string;
+	reason: "missing-asin" | "missing-title" | "duplicate-asin";
+};
+
 // --- Color Mapping --- (Moved from kindle-api.ts)
 const mapTextToColor = (
-	highlightClasses: string | undefined
+	highlightClasses: string | undefined,
 ): Highlight["color"] => {
 	if (!highlightClasses) return undefined;
 	// Regex to extract color name (e.g., "yellow") from class like "kp-notebook-highlight-yellow"
@@ -35,14 +41,21 @@ export class HighlightParser {
 	 * @returns An array of Book objects with metadata.
 	 */
 	public parseNotebookPage($: cheerio.Root, region: string): Book[] {
+		return this.parseNotebookWithDiagnostics($, region).books;
+	}
+
+	public parseNotebookWithDiagnostics($: cheerio.Root, region: string) {
 		const books: Book[] = [];
+		const notebookAsins = new Set<string>();
+		const parsedAsins = new Set<string>();
+		const excludedRows: ExcludedBookRow[] = [];
 
 		$(BOOK_SELECTOR).each((_index: number, element: cheerio.Element) => {
 			const bookElement = $(element);
 
 			// ASIN is usually the element ID in the test/real HTML structure.
 			const elementId = bookElement.attr("id"); // e.g., "BOOK_ASIN_1"
-			let asin = elementId; // Directly use the ID as the ASIN
+			let asin = elementId?.trim(); // Directly use the ID as the ASIN
 
 			// Try finding title with the primary selector, then fallback to the other common one
 			let title = bookElement.find(BOOK_TITLE_SELECTOR).text()?.trim();
@@ -69,10 +82,12 @@ export class HighlightParser {
 			const author = parseAuthor(authorText); // Use imported helper
 			const imageUrl = bookElement.find(BOOK_IMAGE_SELECTOR).attr("src");
 			const dateElement = bookElement.find(BOOK_LAST_ANNOTATED_SELECTOR);
-			const lastAnnotatedText = (dateElement.val() as string | undefined) || dateElement.text()?.trim();
+			const lastAnnotatedText =
+				(dateElement.val() as string | undefined) ||
+				dateElement.text()?.trim();
 			const lastAnnotatedDate = parseToDateString(
 				lastAnnotatedText,
-				region
+				region,
 			); // Use imported helper
 			const bookUrl = bookElement.find(BOOK_URL_SELECTOR).attr("href");
 
@@ -85,12 +100,14 @@ export class HighlightParser {
 					console.warn(
 						"Could not parse book URL for ASIN fallback:",
 						bookUrl,
-						e
+						e,
 					);
 				}
 			}
 
-			if (asin && title) {
+			if (asin) notebookAsins.add(asin);
+			if (asin && title && !parsedAsins.has(asin)) {
+				parsedAsins.add(asin);
 				books.push({
 					id: asin, // Use ASIN as the primary ID
 					asin: asin,
@@ -102,14 +119,23 @@ export class HighlightParser {
 					// highlights array will be populated later
 				});
 			} else {
-				console.warn(
-					"Skipping book element due to missing ASIN or Title:",
-					bookElement.html()
-				);
+				excludedRows.push({
+					row: _index + 1,
+					...(asin ? { asin } : {}),
+					reason: !asin
+						? "missing-asin"
+						: !title
+							? "missing-title"
+							: "duplicate-asin",
+				});
 			}
 		});
 
-		return books;
+		return {
+			books,
+			notebookAsins: Array.from(notebookAsins),
+			excludedRows,
+		};
 	}
 
 	/**

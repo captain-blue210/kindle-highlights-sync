@@ -25,6 +25,7 @@ describe("Kindle fetching completeness", () => {
 				dom: cheerio.load(html) as unknown as cheerio.CheerioAPI,
 				html,
 				finalUrl: url,
+				library: { status: "complete", snapshots: [] },
 			};
 		});
 		const api = new KindleApiService({} as any);
@@ -84,6 +85,7 @@ it("accepts genuine annotation fragments including an empty final page", async (
 			dom: cheerio.load(html) as unknown as cheerio.CheerioAPI,
 			html,
 			finalUrl: url,
+			library: { status: "complete", snapshots: [] },
 		};
 	});
 	const result = await readyApi().fetchHighlights(
@@ -118,6 +120,7 @@ it.each(["unknown", "login", "wrong-book"])(
 					kind === "wrong-book"
 						? url.replace("asin=ASIN0", "asin=OTHER")
 						: url,
+				library: { status: "complete", snapshots: [] },
 			};
 		});
 		const result = await readyApi().fetchHighlights(
@@ -130,6 +133,77 @@ it.each(["unknown", "login", "wrong-book"])(
 	},
 );
 
+it("records listed ASINs, excluded rows and annotation failures as different stages", async () => {
+	const html = oneBook.replace(
+		"</div></div>",
+		'</div><div class="kp-notebook-library-each-book" id="NO_TITLE"></div><div class="kp-notebook-library-each-book" id="FAILED"><h2 class="kp-notebook-searchable">Failed book</h2></div></div>',
+	);
+	vi.mocked(loadRemoteDom).mockImplementation(async (url) => {
+		if (url.includes("asin=FAILED")) throw Error("NETWORK SECRET_COOKIE");
+		const content = url.includes("asin=") ? fragment("abc") : html;
+		return {
+			dom: cheerio.load(content) as unknown as cheerio.CheerioAPI,
+			html: content,
+			finalUrl: url,
+			library: { status: "complete", snapshots: [] },
+		};
+	});
+	const api = readyApi();
+	const result = await api.fetchHighlights("co.jp", new EventEmitter());
+	expect(api.lastFetchDiagnostics).toMatchObject({
+		notebookAsins: ["ASIN0", "NO_TITLE", "FAILED"],
+		parsedAsins: ["ASIN0", "FAILED"],
+		fetchedAsins: ["ASIN0"],
+		excludedRows: [{ row: 2, asin: "NO_TITLE", reason: "missing-title" }],
+		failedAnnotations: [
+			{ asin: "FAILED", reason: "annotation-fetch-failed" },
+		],
+	});
+	expect(result.failedBooks).toBe(1);
+	expect(result.books.map((b) => b.asin)).toEqual(["ASIN0"]);
+	expect(JSON.stringify(api.lastFetchDiagnostics)).not.toContain(
+		"SECRET_COOKIE",
+	);
+});
+
+it.each(["unconfirmed", "load-failed"] as const)(
+	"does not fetch annotations from a %s library",
+	async (status) => {
+		const visited: string[] = [];
+		vi.mocked(loadRemoteDom).mockImplementation(async (url) => {
+			visited.push(url);
+			return {
+				dom: cheerio.load(oneBook) as unknown as cheerio.CheerioAPI,
+				html: oneBook,
+				finalUrl: url,
+				library: { status, snapshots: [] },
+			};
+		});
+		const api = readyApi();
+		await expect(
+			api.fetchHighlights("co.jp", new EventEmitter()),
+		).rejects.toThrow();
+		expect(visited).toEqual(["https://read.amazon.co.jp/notebook"]);
+		expect(api.lastFetchDiagnostics).toMatchObject({
+			library: { status },
+			notebookAsins: ["ASIN0"],
+			fetchedAsins: [],
+		});
+	},
+);
+
+it("records a navigation failure as loading failed instead of an unconfirmed end", async () => {
+	vi.mocked(loadRemoteDom).mockRejectedValue(
+		Error("Notebook navigation failed"),
+	);
+	const api = readyApi();
+	await expect(
+		api.fetchHighlights("co.jp", new EventEmitter()),
+	).rejects.toThrow();
+	expect(api.lastFetchDiagnostics?.library.status).toBe("load-failed");
+	expect(api.lastFetchDiagnostics?.finishedAt).toBeDefined();
+});
+
 it("settles each fetched book once and preserves a safe page failure reason", async () => {
 	vi.mocked(loadRemoteDom).mockImplementation(async (url) => {
 		if (url.includes("asin=ASIN2&"))
@@ -139,6 +213,7 @@ it("settles each fetched book once and preserves a safe page failure reason", as
 			dom: cheerio.load(html) as unknown as cheerio.CheerioAPI,
 			html,
 			finalUrl: url,
+			library: { status: "complete", snapshots: [] },
 		};
 	});
 	const emitter = new EventEmitter();

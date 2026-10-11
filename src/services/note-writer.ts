@@ -27,6 +27,12 @@ export interface NoteWriterSettings {
 	propertyNames: PropertyNames;
 	propertyNameHistory: PropertyNames[];
 }
+export interface NoteSaveOutcome {
+	asin: string;
+	status: "created" | "updated" | "held" | "failed" | "skipped-no-highlights";
+	path?: string;
+	reason?: string;
+}
 export function normalizeOutputDirectory(path: string): string {
 	const normalized = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 	if (
@@ -46,6 +52,7 @@ export interface NoteWriteResult {
 	held: number;
 	failed: number;
 	errors: string[];
+	outcomes?: NoteSaveOutcome[];
 	issues?: SyncIssue[];
 }
 export interface BookOutcome {
@@ -77,6 +84,7 @@ export async function saveBookNotes(
 		held: 0,
 		failed: 0,
 		errors: [] as string[],
+		outcomes: [] as NoteSaveOutcome[],
 		issues: scanIssues,
 	};
 	for (const path of paths) {
@@ -93,6 +101,11 @@ export async function saveBookNotes(
 	}
 	// Missing an identity scan could create a duplicate of a renamed unreadable note.
 	if (result.errors.length) {
+		result.outcomes = books.map((book) => ({
+			asin: book.asin,
+			status: "failed",
+			reason: "identity-scan-failed",
+		}));
 		result.failed = books.length;
 		for (const [index, book] of books.entries())
 			onBookSettled?.(book, index, {
@@ -144,6 +157,12 @@ export async function saveBookNotes(
 				});
 				if (warnings.length) {
 					result.held++;
+					result.outcomes.push({
+						asin: book.asin,
+						status: "held",
+						path: existing.path,
+						reason: warnings.join("; "),
+					});
 					outcome.status = "held";
 					outcome.issues = warnings.map((message) => ({
 						phase: "save",
@@ -156,10 +175,19 @@ export async function saveBookNotes(
 					);
 				} else {
 					result.updated++;
+					result.outcomes.push({
+						asin: book.asin,
+						status: "updated",
+						path: existing.path,
+					});
 					result.added += added;
 				}
 			} else {
 				if (!bookHighlights.length) {
+					result.outcomes.push({
+						asin: book.asin,
+						status: "skipped-no-highlights",
+					});
 					outcome.status = "unchanged";
 					continue;
 				}
@@ -207,10 +235,24 @@ export async function saveBookNotes(
 				await io.create(path, content);
 				notes.push({ path, content });
 				result.created++;
+				result.outcomes.push({
+					asin: book.asin,
+					status: "created",
+					path,
+				});
 				result.added += bookHighlights.length;
 			}
 		} catch (error) {
 			result.failed++;
+			result.outcomes.push({
+				asin: book.asin,
+				status: "failed",
+				reason:
+					error instanceof Error &&
+					error.message === "Multiple notes have the same ASIN"
+						? "duplicate-note-asin"
+						: "note-save-failed",
+			});
 			outcome.status = "failed";
 			const message = safeErrorMessage(error);
 			outcome.issues.push({

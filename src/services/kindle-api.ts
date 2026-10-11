@@ -4,8 +4,8 @@ import { parseAmazonDate } from "./amazon-date";
 import { App } from "obsidian";
 import { createAmazonSession, AmazonSessionController } from "./amazon-session";
 import { Book, Highlight } from "../models";
-import { loadRemoteDom } from "../utils/remote-loader";
-import { HighlightParser } from "./highlight-parser"; // Import the new parser
+import { LibraryReadResult, loadRemoteDom } from "../utils/remote-loader";
+import { ExcludedBookRow, HighlightParser } from "./highlight-parser";
 // import { br2ln, hash } from "../utils";
 
 // --- Region URL Definitions --- (Keep outside class for now)
@@ -139,7 +139,21 @@ type NextPageState = {
 
 import type { BrowserWindow } from "electron"; // Import BrowserWindow type
 
+export interface FetchDiagnostics {
+	region: string;
+	startedAt: string;
+	finishedAt?: string;
+	library: LibraryReadResult;
+	notebookAsins: string[];
+	parsedAsins: string[];
+	excludedRows: ExcludedBookRow[];
+	fetchedAsins: string[];
+	failedAnnotations: { asin: string; reason: "annotation-fetch-failed" }[];
+	failure?: "notebook-fetch-failed";
+}
+
 export class KindleApiService {
+	lastFetchDiagnostics: FetchDiagnostics | undefined;
 	private loggedIn = false;
 	private loginWindow: BrowserWindow | null = null;
 	private sessionController: AmazonSessionController | undefined;
@@ -357,6 +371,17 @@ export class KindleApiService {
 		highlights: Highlight[];
 		failedBooks: number;
 	}> {
+		const diagnostics: FetchDiagnostics = {
+			region,
+			startedAt: new Date().toISOString(),
+			library: { status: "unconfirmed", snapshots: [] },
+			notebookAsins: [],
+			parsedAsins: [],
+			excludedRows: [],
+			fetchedAsins: [],
+			failedAnnotations: [],
+		};
+		this.lastFetchDiagnostics = diagnostics;
 		if (!this.loggedIn) {
 			const errorMsg = "Not logged in to Amazon Kindle.";
 			console.error(`KindleApiService: ${errorMsg}`);
@@ -376,6 +401,7 @@ export class KindleApiService {
 			`KindleApiService: Scraping Kindle notebook: ${notebookUrl}`,
 		);
 
+		let libraryRead = false;
 		try {
 			// 1. Load the main notebook page DOM
 			console.log(
@@ -386,12 +412,20 @@ export class KindleApiService {
 					"Kindle session window is not available. Please log in again.",
 				);
 			}
-			const { dom: notebookDom, finalUrl } = await loadRemoteDom(
+			emitter.emit("fetch:booklist:start");
+			const {
+				dom: notebookDom,
+				finalUrl,
+				library,
+			} = await loadRemoteDom(
 				regionUrls.notebookUrl,
 				USER_AGENT,
-				5000, // Keep timeout
+				0,
 				this.loginWindow, // Reuse existing window
+				{ waitForLibrary: true },
 			);
+			libraryRead = true;
+			diagnostics.library = library ?? diagnostics.library;
 			console.log("KindleApiService: Notebook loaded");
 
 			const notebookAddress = new URL(finalUrl);
@@ -412,14 +446,29 @@ export class KindleApiService {
 			console.log(
 				"KindleApiService: Parsing books using HighlightParser...",
 			);
-			emitter.emit("fetch:booklist:start"); // Indicate book list parsing start
 
 			// Use the existing parser method which parses all books at once
-			const books = this.parser.parseNotebookPage(notebookDom, region);
+			const parsed = this.parser.parseNotebookWithDiagnostics(
+				notebookDom,
+				region,
+			);
+			const books = parsed.books;
+			diagnostics.notebookAsins = parsed.notebookAsins;
+			diagnostics.parsedAsins = books.map((book) => book.asin);
+			diagnostics.excludedRows = parsed.excludedRows;
+			if (diagnostics.library.status !== "complete")
+				throw new Error(
+					diagnostics.library.status === "load-failed"
+						? "Notebook library loading failed"
+						: "Notebook library range unconfirmed",
+				);
 
 			// Emit progress after parsing all books
 			// We can't easily emit per-book progress without changing the parser significantly
-			emitter.emit("fetch:booklist:end", { totalBooks: books.length }); // Indicate book list parsing end
+			emitter.emit("fetch:booklist:end", {
+				totalBooks: books.length,
+				excludedRows: parsed.excludedRows,
+			});
 
 			console.log(`KindleApiService: Parsed ${books.length} books.`);
 			if (books.length === 0) {
@@ -451,14 +500,19 @@ export class KindleApiService {
 						);
 					allHighlights.push(...bookHighlights);
 					successfulBooks.push(book);
+					diagnostics.fetchedAsins.push(book.asin);
 				} catch (error) {
 					console.error(
-						`KindleApiService: Failed to scrape highlights for book ${book.title} (ASIN: ${book.asin}):`,
-						error,
+						`KindleApiService: Failed to scrape highlights for ASIN ${book.asin}`,
 					);
+					diagnostics.failedAnnotations.push({
+						asin: book.asin,
+						reason: "annotation-fetch-failed",
+					});
 					failure = safeErrorMessage(error);
 					// Optionally emit a specific book error event
 					emitter.emit("fetch:book:error", {
+						asin: book.asin,
 						bookTitle: book.title,
 						error: failure,
 					});
@@ -484,6 +538,8 @@ export class KindleApiService {
 				failedBooks: books.length - successfulBooks.length,
 			}; // Return original 'books' list
 		} catch (error) {
+			if (!libraryRead) diagnostics.library.status = "load-failed";
+			diagnostics.failure = "notebook-fetch-failed";
 			console.error(
 				"KindleApiService: Error fetching highlights:",
 				error,
@@ -492,6 +548,8 @@ export class KindleApiService {
 			// Don't automatically log out on fetch errors, could be temporary
 			// new Notice(`Error fetching Kindle highlights: ${error.message}`); // Let main handler or modal show notice
 			throw error;
+		} finally {
+			diagnostics.finishedAt = new Date().toISOString();
 		}
 	}
 }

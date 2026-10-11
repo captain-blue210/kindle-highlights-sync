@@ -123,7 +123,7 @@ describe("HighlightParser", () => {
 			expect(book.author).toBe("Test Author 1");
 			expect(book.imageUrl).toBe("http://example.com/image1.jpg");
 			expect(book.url).toBe(
-				"https://read.amazon.com/notebook?asin=BOOK_ASIN_1"
+				"https://read.amazon.com/notebook?asin=BOOK_ASIN_1",
 			);
 			// Add check for lastAnnotatedDate if parseToDateString is stable
 			// expect(book.lastAnnotatedDate).toEqual(new Date('2024-01-01'));
@@ -195,6 +195,23 @@ describe("HighlightParser", () => {
 		});
 	}); // End describe('parseNotebookPage')
 
+	it("records missing identities/titles and deduplicates rows by ASIN", () => {
+		const $ = cheerio.load(`<div id="kp-notebook-library">
+			<div class="kp-notebook-library-each-book" id="ABC"><h2 class="kp-notebook-searchable">Book A</h2></div>
+			<div class="kp-notebook-library-each-book" id="ABC"><h2 class="kp-notebook-searchable">Book A</h2></div>
+			<div class="kp-notebook-library-each-book" id="NO_TITLE"></div>
+			<div class="kp-notebook-library-each-book"><h2 class="kp-notebook-searchable">No identity</h2></div>
+		</div>`);
+		const result = parser.parseNotebookWithDiagnostics($, "co.jp");
+		expect(result.books.map((book) => book.asin)).toEqual(["ABC"]);
+		expect(result.notebookAsins).toEqual(["ABC", "NO_TITLE"]);
+		expect(result.excludedRows).toEqual([
+			{ row: 2, asin: "ABC", reason: "duplicate-asin" },
+			{ row: 3, asin: "NO_TITLE", reason: "missing-title" },
+			{ row: 4, reason: "missing-asin" },
+		]);
+	});
+
 	// --- Tests for parseHighlightsPage ---
 	describe("parseHighlightsPage", () => {
 		const BOOK_ASIN_1 = "BOOK_ASIN_1";
@@ -243,21 +260,21 @@ describe("HighlightParser", () => {
 			expect(result[0].location).toBe("100"); // Expecting extracted number string
 			expect(result[0].color).toBe("yellow");
 			expect(result[0].note).toBe(
-				"This is a note for the first highlight."
+				"This is a note for the first highlight.",
 			); // Note text associated correctly
 			expect(result[0].appLink).toBe(
-				"kindle://book?action=open&asin=BOOK_ASIN_1&location=100"
+				"kindle://book?action=open&asin=BOOK_ASIN_1&location=100",
 			);
 
 			// Highlight 2
 			expect(result[1].text).toBe(
-				"This is the second highlight text, no note."
+				"This is the second highlight text, no note.",
 			);
 			expect(result[1].location).toBe("200");
 			expect(result[1].color).toBe("blue");
 			expect(result[1].note).toBeUndefined(); // No note for this one
 			expect(result[1].appLink).toBe(
-				"kindle://book?action=open&asin=BOOK_ASIN_1&location=200"
+				"kindle://book?action=open&asin=BOOK_ASIN_1&location=200",
 			);
 		});
 

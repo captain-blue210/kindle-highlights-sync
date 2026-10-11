@@ -27,7 +27,10 @@
     "busy": "Another Kindle operation is running.",
     "partial": "Sync: {{failed}} failures and {{held}} notes held for review.",
     "summary": "Sync complete: {{created}} created, {{updated}} updated, {{added}} highlights added.",
-    "safeFailure": "Sync could not be completed. Notes for books with authentication or fetch failures were not changed."
+    "safeFailure": "Sync could not be completed. Notes for books with authentication or fetch failures were not changed.",
+    "libraryUnconfirmed": "Could not confirm the complete library range. Notes were not changed; the observed range is in the diagnostics report.",
+    "libraryLoadFailed": "Loading additional library pages failed. Notes were not changed; the observed range is in the diagnostics report.",
+    "diagnosticsWriteFailed": "Could not save the sync diagnostics file. The latest report is retained in the plugin."
   },
   "noteOutput": {
     "locationLabel": "Location",
