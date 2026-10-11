@@ -21,6 +21,7 @@ import {
 	runMigration,
 } from "./services/property-migration";
 import { createVaultIO } from "./services/vault-io";
+import { acquireBackgroundExecution } from "./utils/background-execution";
 import {
 	DEFAULT_SETTINGS,
 	KindleHighlightsSettings,
@@ -32,6 +33,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 	kindleApiService: KindleApiService;
 	private busy = false;
 	private disposed = false;
+	private releaseBackgroundExecution: (() => void) | undefined;
 	private previews = new WeakMap<MigrationPreview, string>();
 	lastSyncResult: Awaited<ReturnType<typeof saveBookNotes>> | undefined;
 	lastSyncDiagnostics:
@@ -92,7 +94,16 @@ export default class KindleHighlightsPlugin extends Plugin {
 	}
 	onunload() {
 		this.disposed = true;
-		this.kindleApiService?.dispose();
+		try {
+			this.kindleApiService?.dispose();
+		} finally {
+			try {
+				this.releaseBackgroundExecution?.();
+			} catch {
+				console.error("Kindle background timer setting could not be restored");
+			}
+			this.releaseBackgroundExecution = undefined;
+		}
 	}
 	async loadSettings() {
 		const saved = (await this.loadData()) ?? {};
@@ -221,6 +232,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 		}
 	}
 	async syncHighlights() {
+		if (this.disposed) return;
 		if (this.busy) {
 			new Notice(t("sync.busy"));
 			return;
@@ -242,12 +254,14 @@ export default class KindleHighlightsPlugin extends Plugin {
 		let fetchStarted = false;
 		const emitter = new EventEmitter();
 		const modal = new SyncProgressModal(this.app, emitter);
-		modal.open();
+		let releaseBackgroundExecution: (() => void) | undefined;
 		const showError = (message: string) => {
 			new Notice(message);
 			if (emitter.listenerCount("error")) emitter.emit("error", message);
 		};
 		try {
+			this.releaseBackgroundExecution = releaseBackgroundExecution = acquireBackgroundExecution();
+			modal.open();
 			if (!(await this.kindleApiService.login(settings.amazonRegion))) {
 				diagnostics.status = "login-cancelled";
 				showError(t("sync.loginCancelledOrFailed"));
@@ -338,6 +352,13 @@ export default class KindleHighlightsPlugin extends Plugin {
 				),
 			);
 		} finally {
+			try { releaseBackgroundExecution?.(); }
+			catch {
+				diagnostics.status = "failed";
+				console.error("Kindle background timer setting could not be restored");
+				showError(t("sync.safeFailure"));
+			}
+			this.releaseBackgroundExecution = undefined;
 			if (fetchStarted)
 				diagnostics.fetch = this.kindleApiService.lastFetchDiagnostics;
 			diagnostics.finishedAt = new Date().toISOString();
