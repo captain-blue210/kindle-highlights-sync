@@ -1,3 +1,4 @@
+import { BookStatus, SyncIssue, safeErrorMessage } from "./sync-progress";
 import type { Book, Highlight } from "../models";
 import {
 	PropertyNames,
@@ -44,13 +45,28 @@ export function normalizeOutputDirectory(path: string): string {
 		throw new Error("Invalid output directory");
 	return normalized;
 }
+export interface NoteWriteResult {
+	created: number;
+	updated: number;
+	added: number;
+	held: number;
+	failed: number;
+	errors: string[];
+	outcomes?: NoteSaveOutcome[];
+	issues?: SyncIssue[];
+}
+export interface BookOutcome {
+	status: BookStatus;
+	issues: SyncIssue[];
+}
 export async function saveBookNotes(
 	io: NoteWriterIO,
 	settings: NoteWriterSettings,
 	books: Book[],
 	highlights: Highlight[],
 	onBook?: (book: Book, index: number) => void,
-) {
+	onBookSettled?: (book: Book, index: number, outcome: BookOutcome) => void,
+): Promise<NoteWriteResult> {
 	const output = normalizeOutputDirectory(settings.outputDirectory);
 	const paths = io
 		.list()
@@ -60,6 +76,7 @@ export async function saveBookNotes(
 				(output ? path.startsWith(output + "/") : !path.includes("/")),
 		);
 	const notes: NoteSnapshot[] = [];
+	const scanIssues: SyncIssue[] = [];
 	const result = {
 		created: 0,
 		updated: 0,
@@ -68,27 +85,39 @@ export async function saveBookNotes(
 		failed: 0,
 		errors: [] as string[],
 		outcomes: [] as NoteSaveOutcome[],
+		issues: scanIssues,
 	};
 	for (const path of paths) {
 		try {
 			notes.push({ path, content: await io.read(path) });
 		} catch {
 			result.errors.push(`${path}: unreadable note`);
+			scanIssues.push({
+				phase: "save",
+				path,
+				message: "Unreadable note",
+			});
 		}
 	}
 	// Missing an identity scan could create a duplicate of a renamed unreadable note.
 	if (result.errors.length) {
-		result.failed = Math.max(books.length, result.errors.length);
 		result.outcomes = books.map((book) => ({
 			asin: book.asin,
 			status: "failed",
 			reason: "identity-scan-failed",
 		}));
+		result.failed = books.length;
+		for (const [index, book] of books.entries())
+			onBookSettled?.(book, index, {
+				status: "failed",
+				issues: scanIssues,
+			});
 		return result;
 	}
 	for (const [index, book] of books.entries()) {
 		onBook?.(book, index);
 		const bookHighlights = highlights.filter((h) => h.bookId === book.id);
+		const outcome: BookOutcome = { status: "success", issues: [] };
 		try {
 			const existing = findExistingNote(
 				notes,
@@ -122,6 +151,7 @@ export async function saveBookNotes(
 					);
 					added = merged.added;
 					warnings = merged.warnings;
+					outcome.status = merged.content === current ? "unchanged" : "success";
 					existing.content = merged.content;
 					return merged.content;
 				});
@@ -133,6 +163,13 @@ export async function saveBookNotes(
 						path: existing.path,
 						reason: warnings.join("; "),
 					});
+					outcome.status = "held";
+					outcome.issues = warnings.map((message) => ({
+						phase: "save",
+						bookTitle: book.title,
+						path: existing.path,
+						message,
+					}));
 					result.errors.push(
 						`${existing.path}: ${warnings.join("; ")}`,
 					);
@@ -151,6 +188,7 @@ export async function saveBookNotes(
 						asin: book.asin,
 						status: "skipped-no-highlights",
 					});
+					outcome.status = "unchanged";
 					continue;
 				}
 				if (
@@ -215,9 +253,17 @@ export async function saveBookNotes(
 						? "duplicate-note-asin"
 						: "note-save-failed",
 			});
-			result.errors.push(
-				`${book.title}: note could not be safely updated`,
-			);
+			outcome.status = "failed";
+			const message = safeErrorMessage(error);
+			outcome.issues.push({
+				phase: "save",
+				bookTitle: book.title,
+				message,
+			});
+			result.errors.push(`${book.title}: ${message}`);
+		} finally {
+			result.issues.push(...outcome.issues);
+			onBookSettled?.(book, index, outcome);
 		}
 	}
 	return result;

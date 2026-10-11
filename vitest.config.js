@@ -1,5 +1,6 @@
 // vitest.config.js
 import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
 	test: {
@@ -10,10 +11,9 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			// Prevent Vite from trying to resolve the actual 'obsidian' package.
-			// Aliasing it to a non-existent path tells Vite to stop looking for it.
-			// The vi.mock in the test file will handle providing a mock implementation.
-			obsidian: "/nonexistent-path/obsidian.js", // Use a clearly invalid path
+			obsidian: fileURLToPath(
+				new URL("./src/test-utils/obsidian.ts", import.meta.url),
+			),
 		},
 	},
 });

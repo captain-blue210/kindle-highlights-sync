@@ -1,6 +1,7 @@
+import { safeErrorMessage } from "./sync-progress";
 import { EventEmitter } from "events"; // ★ Import EventEmitter
 import { parseAmazonDate } from "./amazon-date";
-import { App, Notice } from "obsidian"; // Keep App, Notice
+import { App } from "obsidian";
 import { createAmazonSession, AmazonSessionController } from "./amazon-session";
 import { Book, Highlight } from "../models";
 import { LibraryReadResult, loadRemoteDom } from "../utils/remote-loader";
@@ -331,14 +332,12 @@ export class KindleApiService {
 				emitter.emit("fetch:page:error", {
 					bookTitle: book.title,
 					url: regionUrls.notebookUrl,
-					error: "Highlight page unavailable",
+					error: safeErrorMessage(pageError),
 				}); // ★ Emit page error
 				// Decide if we should stop for this book or try to continue? Stop for now.
 				hasNextPage = false;
 				// Optionally re-throw or handle differently
-				throw new Error(
-					`Failed to scrape highlights for book ${book.title}`,
-				);
+				throw new Error(safeErrorMessage(pageError));
 			}
 		}
 
@@ -386,7 +385,6 @@ export class KindleApiService {
 		if (!this.loggedIn) {
 			const errorMsg = "Not logged in to Amazon Kindle.";
 			console.error(`KindleApiService: ${errorMsg}`);
-			new Notice(errorMsg);
 			throw new Error(errorMsg);
 		}
 
@@ -396,7 +394,6 @@ export class KindleApiService {
 		if (!regionUrls) {
 			const errorMsg = `Invalid or unsupported Amazon region: ${region}`;
 			console.error(`KindleApiService: ${errorMsg}`);
-			new Notice(errorMsg);
 			throw new Error(errorMsg);
 		}
 		const notebookUrl = regionUrls.notebookUrl;
@@ -491,7 +488,8 @@ export class KindleApiService {
 			const allHighlights: Highlight[] = []; // Define allHighlights here - Use const
 
 			// Use the limited list for scraping
-			for (const book of books) {
+			for (const [index, book] of books.entries()) {
+				let failure: string | undefined;
 				try {
 					// ★ Pass emitter down
 					const bookHighlights =
@@ -511,16 +509,20 @@ export class KindleApiService {
 						asin: book.asin,
 						reason: "annotation-fetch-failed",
 					});
+					failure = safeErrorMessage(error);
 					// Optionally emit a specific book error event
 					emitter.emit("fetch:book:error", {
 						asin: book.asin,
 						bookTitle: book.title,
-						error: error.message,
+						error: failure,
 					});
-					new Notice(
-						`Failed to fetch highlights for "${book.title}". Check console for details.`,
-					);
-					// Continue to next book even if one fails
+				} finally {
+					emitter.emit("fetch:book:settled", {
+						bookId: String(index),
+						bookTitle: book.title,
+						status: failure ? "failed" : "success",
+						error: failure,
+					});
 				}
 			}
 
@@ -542,7 +544,7 @@ export class KindleApiService {
 				"KindleApiService: Error fetching highlights:",
 				error,
 			);
-			emitter.emit("fetch:error", error.message || "Unknown fetch error"); // Emit fetch error
+			emitter.emit("fetch:error", safeErrorMessage(error)); // Emit fetch error
 			// Don't automatically log out on fetch errors, could be temporary
 			// new Notice(`Error fetching Kindle highlights: ${error.message}`); // Let main handler or modal show notice
 			throw error;

@@ -1,5 +1,13 @@
+import {
+	BookCounts,
+	SyncErrorRecord,
+	SyncPhase,
+	SyncProgressTracker,
+	readErrorRecord,
+	safeErrorMessage,
+} from "./services/sync-progress";
 import { EventEmitter } from "events";
-import { Modal, Notice, Plugin } from "obsidian";
+import { Notice, Plugin } from "obsidian";
 import { loadTranslations, t } from "./i18n";
 import { AmazonLogoutModal } from "./modals/AmazonLogoutModal";
 import { PropertyMigrationModal } from "./modals/PropertyMigrationModal";
@@ -30,10 +38,14 @@ import {
 
 export default class KindleHighlightsPlugin extends Plugin {
 	settings: KindleHighlightsSettings;
+	syncProgress?: SyncProgressTracker;
+	readonly diagnostics = new EventEmitter();
 	kindleApiService: KindleApiService;
 	private busy = false;
 	private disposed = false;
 	private releaseBackgroundExecution: (() => void) | undefined;
+	private settingsSave: Promise<void> = Promise.resolve();
+	private diagnosticRevision = 0;
 	private previews = new WeakMap<MigrationPreview, string>();
 	lastSyncResult: Awaited<ReturnType<typeof saveBookNotes>> | undefined;
 	lastSyncDiagnostics:
@@ -118,11 +130,40 @@ export default class KindleHighlightsPlugin extends Plugin {
 				? saved.propertyNameHistory
 				: [],
 			amazonSessionSecrets: { ...saved.amazonSessionSecrets },
+			lastErrorRecord: readErrorRecord(saved.lastErrorRecord),
 		};
 		validatePropertyNames(this.settings.propertyNames);
 	}
 	async saveSettings() {
-		await this.saveData(this.settings);
+		const snapshot = JSON.parse(JSON.stringify(this.settings));
+		const saving = this.settingsSave
+			.catch(() => {})
+			.then(() => this.saveData(snapshot));
+		this.settingsSave = saving;
+		await saving;
+	}
+	async recordError(record: SyncErrorRecord) {
+		this.diagnosticRevision++;
+		this.settings.lastErrorRecord = readErrorRecord(record);
+		this.diagnostics.emit("change");
+		try {
+			await this.saveSettings();
+		} catch {
+			new Notice(t("diagnostics.saveFailed"));
+		}
+	}
+	async clearErrorRecord() {
+		const previous = this.settings.lastErrorRecord;
+		const revision = ++this.diagnosticRevision;
+		delete this.settings.lastErrorRecord;
+		try {
+			await this.saveSettings();
+		} catch {
+			if (revision === this.diagnosticRevision)
+				this.settings.lastErrorRecord = previous;
+			new Notice(t("diagnostics.clearFailed"));
+		}
+		this.diagnostics.emit("change");
 	}
 	async changePropertyNames(next: PropertyNames) {
 		validatePropertyNames(next);
@@ -159,6 +200,17 @@ export default class KindleHighlightsPlugin extends Plugin {
 		this.busy = true;
 		try {
 			await this.kindleApiService.logout(region);
+		} catch (error) {
+			await this.recordError({
+				at: new Date().toISOString(),
+				operation: "logout",
+				region,
+				status: "failed",
+				issues: [
+					{ phase: "session", message: safeErrorMessage(error) },
+				],
+			});
+			throw new Error(safeErrorMessage(error));
 		} finally {
 			this.busy = false;
 		}
@@ -169,18 +221,39 @@ export default class KindleHighlightsPlugin extends Plugin {
 			return;
 		}
 		this.busy = true;
+		const region = this.settings.amazonRegion;
 		try {
-			new Notice(
-				(await this.kindleApiService.login(this.settings.amazonRegion))
-					? t("modals.amazonLogin.success")
-					: t("sync.loginCancelledOrFailed"),
-			);
-		} catch {
+			if (await this.kindleApiService.login(region))
+				new Notice(t("modals.amazonLogin.success"));
+			else {
+				await this.recordError({
+					at: new Date().toISOString(),
+					operation: "login",
+					region,
+					status: "failed",
+					issues: [
+						{
+							phase: "auth",
+							message: "Login cancelled or not completed",
+						},
+					],
+				});
+				new Notice(t("sync.loginCancelledOrFailed"));
+			}
+		} catch (error) {
+			await this.recordError({
+				at: new Date().toISOString(),
+				operation: "login",
+				region,
+				status: "failed",
+				issues: [{ phase: "auth", message: safeErrorMessage(error) }],
+			});
 			new Notice(t("auth.failed"));
 		} finally {
 			this.busy = false;
 		}
 	}
+
 	async previewProperties(): Promise<MigrationPreview> {
 		if (this.busy) throw new Error(t("sync.busy"));
 		this.busy = true;
@@ -238,10 +311,10 @@ export default class KindleHighlightsPlugin extends Plugin {
 			return;
 		}
 		this.busy = true;
+		this.lastSyncResult = undefined;
 		const settings: KindleHighlightsSettings = JSON.parse(
 			JSON.stringify(this.settings),
 		);
-		this.lastSyncResult = undefined;
 		const diagnostics: NonNullable<
 			KindleHighlightsPlugin["lastSyncDiagnostics"]
 		> = {
@@ -252,113 +325,194 @@ export default class KindleHighlightsPlugin extends Plugin {
 		};
 		this.lastSyncDiagnostics = diagnostics;
 		let fetchStarted = false;
-		const emitter = new EventEmitter();
-		const modal = new SyncProgressModal(this.app, emitter);
 		let releaseBackgroundExecution: (() => void) | undefined;
-		const showError = (message: string) => {
-			new Notice(message);
-			if (emitter.listenerCount("error")) emitter.emit("error", message);
+		const tracker = (this.syncProgress = new SyncProgressTracker(
+			settings.downloadMetadata,
+		));
+		const emitter = new EventEmitter();
+		let totalBooks: number | null = null;
+		let fetchFailed = 0;
+		let excludedCount = 0;
+		let exclusions: FetchDiagnostics["excludedRows"] = [];
+		let phase: SyncPhase = "auth";
+		let finalCounts: BookCounts | undefined;
+		const trackExclusions = (rows: FetchDiagnostics["excludedRows"]) => {
+			exclusions = rows.filter((row) => row.reason !== "duplicate-asin");
+			excludedCount = exclusions.length;
+			for (const _row of exclusions)
+				tracker.addIssue({ phase: "fetch", message: "Notebook library row excluded" });
+		};
+		emitter.on(
+			"fetch:booklist:end",
+			({ totalBooks: total, excludedRows = [] }: { totalBooks: number; excludedRows?: FetchDiagnostics["excludedRows"] }) => {
+				totalBooks = total;
+				trackExclusions(excludedRows);
+				tracker.startPhase("fetch", total);
+			},
+		);
+		emitter.on(
+			"fetch:highlights:start",
+			({ bookTitle }: { bookTitle: string }) =>
+				tracker.startBook(bookTitle),
+		);
+		emitter.on(
+			"fetch:book:settled",
+			(event: {
+				bookId: string;
+				bookTitle: string;
+				status: "success" | "failed";
+				error?: string;
+			}) => {
+				if (event.error)
+					tracker.addIssue({
+						phase: "fetch",
+						bookTitle: event.bookTitle,
+						message: event.error,
+					});
+				tracker.settleBook(event.bookId, event.status, event.bookTitle);
+				fetchFailed = tracker.state.counts.failed;
+			},
+		);
+		const overallCounts = (): BookCounts => {
+			const saving = phase === "save" || phase === "session";
+			return {
+				total: totalBooks === null ? null : totalBooks + excludedCount,
+				completed: saving ? tracker.state.counts.completed : 0,
+				failed:
+					excludedCount + fetchFailed +
+					(saving
+						? tracker.state.counts.failed
+						: phase === "metadata" && tracker.state.currentBook
+							? 1
+							: 0),
+				held: saving ? tracker.state.counts.held : 0,
+			};
 		};
 		try {
 			this.releaseBackgroundExecution = releaseBackgroundExecution = acquireBackgroundExecution();
-			modal.open();
+			new SyncProgressModal(this.app, tracker).open();
 			if (!(await this.kindleApiService.login(settings.amazonRegion))) {
+				tracker.addIssue({
+					phase: "auth",
+					message: "Login cancelled or not completed",
+				});
 				diagnostics.status = "login-cancelled";
-				showError(t("sync.loginCancelledOrFailed"));
+				tracker.finish("failed");
+				new Notice(t("sync.loginCancelledOrFailed"));
 				return;
 			}
+			if (this.disposed) return;
 			fetchStarted = true;
+			phase = "fetch";
+			tracker.startPhase("fetch");
 			const { books, highlights, failedBooks } =
 				await this.kindleApiService.fetchHighlights(
 					settings.amazonRegion,
 					emitter,
 				);
+			fetchFailed = failedBooks;
+			totalBooks ??= books.length + failedBooks;
+			trackExclusions(this.kindleApiService.lastFetchDiagnostics?.excludedRows ?? exclusions);
 			if (this.disposed) return;
-			if (settings.downloadMetadata)
-				for (const book of books) {
+			if (settings.downloadMetadata) {
+				phase = "metadata";
+				tracker.startPhase("metadata", books.length);
+				for (const [index, book] of books.entries()) {
+					tracker.startBook(book.title);
 					book.metadata = await fetchBookMetadata(
 						book,
 						settings.amazonRegion,
 						true,
 					);
+					tracker.settleBook(String(index), "success");
+					if (this.disposed) return;
 				}
-			if (this.disposed) return;
-			emitter.emit("start", { totalBookCount: books.length });
+			}
+			phase = "save";
+			tracker.startPhase("save", books.length);
 			const result = await saveBookNotes(
 				createVaultIO(this.app, () => !this.disposed),
 				settings,
 				books,
 				highlights,
-				(book, index) => {
-					emitter.emit("book:start", {
-						bookTitle: book.title,
-						booksProcessedCount: index,
-						totalBookCount: books.length,
-					});
+				(book) => tracker.startBook(book.title),
+				(book, index, outcome) => {
+					for (const issue of outcome.issues) tracker.addIssue(issue);
+					tracker.settleBook(String(index), outcome.status, book.title);
 				},
 			);
 			diagnostics.noteSave = JSON.parse(JSON.stringify(result));
-			const exclusions =
-				this.kindleApiService.lastFetchDiagnostics?.excludedRows.filter(
-					(row) => row.reason !== "duplicate-asin",
-				) ?? [];
-			result.failed += failedBooks + exclusions.length;
-			for (const row of exclusions)
-				result.errors.push(
-					`Notebook row ${row.row}${row.asin ? ` (ASIN: ${row.asin})` : ""}: ${row.reason}`,
-				);
-			this.lastSyncResult = result;
-			await this.kindleApiService.persist(settings.amazonRegion);
-			if (result.failed || result.held) {
-				diagnostics.status = "partial";
-				showError(
-					t("sync.partial", {
-						failed: result.failed,
-						held: result.held,
-					}),
-				);
-				const report = new Modal(this.app);
-				report.titleEl.setText(
-					t("sync.partial", {
-						failed: result.failed,
-						held: result.held,
-					}),
-				);
-				for (const error of result.errors)
-					report.contentEl.createEl("p", { text: error });
-				report.open();
-			} else {
-				diagnostics.status = "complete";
-				emitter.emit("end");
-				new Notice(
-					t("sync.summary", {
-						created: result.created,
-						updated: result.updated,
-						added: result.added,
-					}),
-				);
+			for (const row of exclusions) {
+				result.errors.push(`Notebook row ${row.row}${row.asin ? ` (ASIN: ${row.asin})` : ""}: ${row.reason}`);
 			}
-		} catch {
-			const state = fetchStarted
-				? this.kindleApiService.lastFetchDiagnostics?.library.status
-				: undefined;
-			showError(
-				t(
-					state === "unconfirmed"
-						? "sync.libraryUnconfirmed"
-						: state === "load-failed"
-							? "sync.libraryLoadFailed"
-							: "sync.safeFailure",
-				),
+			for (const issue of result.issues ?? []) tracker.addIssue(issue);
+			finalCounts = overallCounts();
+			result.failed += failedBooks + excludedCount;
+			this.lastSyncResult = result;
+			if (this.disposed) return;
+			phase = "session";
+			await this.kindleApiService.persist(settings.amazonRegion);
+			const partial =
+				result.failed > 0 ||
+				result.held > 0 ||
+				tracker.state.issues.length > 0;
+			diagnostics.status = partial ? "partial" : "complete";
+			tracker.finish(partial ? "partial" : "completed", finalCounts);
+			new Notice(
+				t(partial ? "sync.partial" : "sync.summary", {
+					failed: result.failed,
+					held: result.held,
+					created: result.created,
+					updated: result.updated,
+					added: result.added,
+				}),
 			);
+		} catch (error) {
+			tracker.addIssue({
+				phase,
+				...(tracker.state.currentBook
+					? { bookTitle: tracker.state.currentBook }
+					: {}),
+				message: safeErrorMessage(error),
+			});
+			tracker.finish(
+				this.disposed
+					? "interrupted"
+					: phase === "session"
+						? "partial"
+						: "failed",
+				finalCounts ?? overallCounts(),
+			);
+			const state = fetchStarted ? this.kindleApiService.lastFetchDiagnostics?.library.status : undefined;
+			new Notice(t(state === "unconfirmed" ? "sync.libraryUnconfirmed" : state === "load-failed" ? "sync.libraryLoadFailed" : "sync.safeFailure"));
 		} finally {
 			try { releaseBackgroundExecution?.(); }
 			catch {
 				diagnostics.status = "failed";
 				console.error("Kindle background timer setting could not be restored");
-				showError(t("sync.safeFailure"));
+				tracker.addIssue({ phase: "session", message: "Desktop background timer setting could not be restored" });
+				tracker.finish("failed", finalCounts ?? overallCounts());
+				new Notice(t("sync.safeFailure"));
 			}
 			this.releaseBackgroundExecution = undefined;
+			if (tracker.state.status === "running") {
+				tracker.addIssue({ phase, message: "Plugin unloaded" });
+				tracker.finish("interrupted", finalCounts ?? overallCounts());
+			}
+			if (diagnostics.status !== "login-cancelled")
+				diagnostics.status = tracker.state.status === "completed" ? "complete" : tracker.state.status === "partial" ? "partial" : "failed";
+			if (tracker.state.status !== "completed") {
+				if (!tracker.state.issues.length)
+					tracker.addIssue({ phase, message: "Unexpected error" });
+				await this.recordError({
+					at: new Date().toISOString(),
+					operation: "sync",
+					region: settings.amazonRegion,
+					status: tracker.state.status as SyncErrorRecord["status"],
+					counts: tracker.state.counts,
+					issues: tracker.state.issues,
+				});
+			}
 			if (fetchStarted)
 				diagnostics.fetch = this.kindleApiService.lastFetchDiagnostics;
 			diagnostics.finishedAt = new Date().toISOString();
@@ -377,6 +531,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 				);
 				new Notice(t("sync.diagnosticsWriteFailed"));
 			}
+			emitter.removeAllListeners();
 			this.busy = false;
 		}
 	}
