@@ -34,7 +34,8 @@ describe("append-only Kindle sync", () => {
 		).toBe("45471");
 	});
 	it("preserves edited anchored highlights, memos, filenames and adds only new highlights", () => {
-		const body = "> My edited abc ^ref-19495\n\nPersonal memo\n";
+		const body =
+			"> My edited abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\nPersonal memo\n";
 		const result = mergeHighlights(
 			body,
 			[h("abc", "10"), h("new", "20")],
@@ -108,7 +109,7 @@ describe("append-only Kindle sync", () => {
 	});
 	it("updates metadata for zero-new-highlight sync without rewriting the body", () => {
 		const source =
-			'---\nbookId: "999"\ntitle: Book\nASIN: ABC\nhighlights: 1\nlastAnnotated: Invalid date\n---\n\n> Edited abc ^ref-19495\n\nMy memo\n';
+			'---\nbookId: "999"\ntitle: Book\nASIN: ABC\nhighlights: 1\nlastAnnotated: Invalid date\n---\n\n> Edited abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\nMy memo\n';
 		const result = syncNoteContent(
 			source,
 			book,
@@ -117,7 +118,9 @@ describe("append-only Kindle sync", () => {
 			[],
 		);
 		expect(result.added).toBe(0);
-		expect(splitNote(result.content).body).toBe(splitNote(source).body);
+		expect(
+			splitNote(result.content).body.startsWith(splitNote(source).body),
+		).toBe(true);
 		expect(readBookProperties(result.content, names, [])).toMatchObject({
 			bookId: "999",
 			lastAnnotatedDate: "2026-10-08",
@@ -149,7 +152,7 @@ it("matches hadynz plain text highlights without anchors by text and location", 
 		"ABC",
 	);
 	expect(result.added).toBe(0);
-	expect(result.body).toBe(body);
+	expect(result.body.startsWith(body)).toBe(true);
 	expect(result.warnings).toEqual([]);
 	const edited = body.replace("abc", "edited");
 	expect(

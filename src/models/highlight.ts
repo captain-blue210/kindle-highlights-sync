@@ -1,5 +1,8 @@
 export interface Highlight {
 	id: string;
+	/** Observed Amazon DOM operation IDs, not a verified stable sync identity. */
+	sourceAnnotationId?: string;
+	sourceHighlightId?: string;
 	bookId: string;
 	text: string;
 	location: string;
