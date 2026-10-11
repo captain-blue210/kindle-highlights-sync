@@ -3,6 +3,7 @@ import {
 	DestinationHoldReason,
 	DestinationResolution,
 	NoteDestinations,
+	noteAsin,
 	resolveNoteDestination,
 } from "./note-destination";
 import { BookStatus, SyncIssue, safeErrorMessage } from "./sync-progress";
@@ -105,6 +106,14 @@ export async function saveBookNotes(
 				content: await io.read(path),
 			});
 		} catch {
+			// A selected file removed after list() is a destination hold, not a failed scan.
+			if (
+				!io.list().includes(path) &&
+				Object.values(settings.noteDestinations ?? {}).some(
+					(s) => s.path === path,
+				)
+			)
+				continue;
 			result.errors.push(`${path}: unreadable note`);
 			scanIssues.push({
 				phase: "save",
@@ -172,8 +181,11 @@ export async function saveBookNotes(
 								candidates: notes
 									.filter(
 										(n) =>
-											safeProperties(n.content, settings)
-												?.asin === book.asin,
+											noteAsin(
+												n,
+												settings.propertyNames,
+												settings.propertyNameHistory,
+											) === book.asin,
 									)
 									.map((n) => n.path)
 									.sort(),
@@ -187,8 +199,13 @@ export async function saveBookNotes(
 					);
 
 					if (
-						!properties ||
-						(properties.asin && properties.asin !== book.asin)
+						(!properties &&
+							noteAsin(
+								{ path: existing.path, content: current },
+								settings.propertyNames,
+								settings.propertyNameHistory,
+							) !== book.asin) ||
+						(properties?.asin && properties.asin !== book.asin)
 					)
 						throw new Error(
 							"Note identity changed during synchronization",
@@ -311,8 +328,11 @@ export async function saveBookNotes(
 					candidates: notes
 						.filter(
 							(n) =>
-								safeProperties(n.content, settings)?.asin ===
-								book.asin,
+								noteAsin(
+									n,
+									settings.propertyNames,
+									settings.propertyNameHistory,
+								) === book.asin,
 						)
 						.map((n) => n.path)
 						.sort(),

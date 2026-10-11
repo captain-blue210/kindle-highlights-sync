@@ -82,3 +82,24 @@ it.each([
 		).toMatchObject({ status: "held", reason: "destination-invalid" });
 	},
 );
+
+it("requires explicit selection for all same-ASIN paths even without other book metadata", () => {
+	const minimal = {
+		path: "books/Minimal.md",
+		ctime: 30,
+		content: "---\nASIN: ABC\ncustom: keep\n---\nMemo\n",
+	};
+	const all = [notes[0], minimal];
+	expect(
+		groupNoteDestinations(all)[0]?.candidates.map((n) => n.path),
+	).toEqual([notes[0].path, minimal.path]);
+	expect(resolveNoteDestination(all, book)).toMatchObject({
+		status: "held",
+		reason: "destination-unselected",
+	});
+	expect(
+		resolveNoteDestination(all, book, {
+			ABC: { path: minimal.path, ctime: 30 },
+		}),
+	).toMatchObject({ status: "existing", note: minimal });
+});

@@ -704,3 +704,142 @@ it("persists detected destination invalidation and reports it as held in progres
 		"destination-identity-changed",
 	);
 });
+
+it("does not resurrect a failed provisional selection through another queued settings save", async () => {
+	const p = plugin(),
+		path = "books/A.md",
+		content = "---\nASIN: ABC\nbookId: saved\ntitle: Book\n---\nMemo\n";
+	p.settings.noteDestinations = { OTHER: { path: "other/B.md", ctime: 20 } };
+	vi.mocked(createVaultIO).mockReturnValue({
+		list: () => [path],
+		identity: () => 10,
+		read: async () => content,
+	} as any);
+	let reject!: (e: Error) => void,
+		first = true,
+		disk: any;
+	p.saveData = async (data) => {
+		if (first) {
+			first = false;
+			await new Promise<void>((_r, j) => {
+				reject = j;
+			});
+		}
+		disk = JSON.parse(JSON.stringify(data));
+	};
+	const selecting = p.selectNoteDestination("ABC", {
+		path,
+		ctime: 10,
+		content,
+	});
+	await vi.waitFor(() => expect(reject).toBeTypeOf("function"));
+	const invalidating = p.invalidateDestinations("other/B.md", "renamed");
+	reject(Error("ENOSPC"));
+	await expect(selecting).rejects.toThrow();
+	await invalidating;
+	expect(p.settings.noteDestinations.ABC).toBeUndefined();
+	expect(disk.noteDestinations.ABC).toBeUndefined();
+	expect(disk.noteDestinations.OTHER.invalidated).toBe("renamed");
+});
+it("includes a successful selection in later queued settings saves", async () => {
+	const p = plugin(),
+		path = "books/A.md",
+		content = "---\nASIN: ABC\nbookId: saved\ntitle: Book\n---\nMemo\n";
+	vi.mocked(createVaultIO).mockReturnValue({
+		list: () => [path],
+		identity: () => 10,
+		read: async () => content,
+	} as any);
+	let release!: () => void,
+		first = true,
+		disk: any;
+	p.saveData = async (data) => {
+		if (first) {
+			first = false;
+			await new Promise<void>((r) => {
+				release = r;
+			});
+		}
+		disk = JSON.parse(JSON.stringify(data));
+	};
+	const selecting = p.selectNoteDestination("ABC", {
+		path,
+		ctime: 10,
+		content,
+	});
+	await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+	p.settings.outputDirectory = "changed";
+	const later = p.saveSettings();
+	release();
+	await Promise.all([selecting, later]);
+	expect(disk.noteDestinations.ABC).toEqual({ path, ctime: 10 });
+	expect(disk.outputDirectory).toBe("changed");
+});
+it("invalidates a destination renamed while its selection is pending persistence", async () => {
+	const p = plugin(),
+		path = "books/A.md",
+		content = "---\nASIN: ABC\nbookId: saved\ntitle: Book\n---\nMemo\n";
+	vi.mocked(createVaultIO).mockReturnValue({
+		list: () => [path],
+		identity: () => 10,
+		read: async () => content,
+	} as any);
+	let release!: () => void,
+		first = true,
+		disk: any;
+	p.saveData = async (data) => {
+		if (first) {
+			first = false;
+			await new Promise<void>((r) => {
+				release = r;
+			});
+		}
+		disk = JSON.parse(JSON.stringify(data));
+	};
+	const selecting = p.selectNoteDestination("ABC", {
+		path,
+		ctime: 10,
+		content,
+	});
+	await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+	const invalidating = p.invalidateDestinations(path, "renamed");
+	release();
+	await Promise.all([selecting, invalidating]);
+	expect(p.settings.noteDestinations.ABC.invalidated).toBe("renamed");
+	expect(disk.noteDestinations.ABC.invalidated).toBe("renamed");
+});
+
+it("registers rename/delete handlers that invalidate selected notes and folder descendants", async () => {
+	const p = plugin(),
+		handlers: Record<string, Function> = {};
+	p.settings.noteDestinations = {
+		ABC: { path: "books/A.md", ctime: 10 },
+		OTHER: { path: "other/B.md", ctime: 20 },
+	};
+	p.loadData = vi.fn(async () => JSON.parse(JSON.stringify(p.settings)));
+	(p.app.vault as any).on = vi.fn((name: string, fn: Function) => {
+		handlers[name] = fn;
+		return {};
+	});
+	p.registerEvent = vi.fn();
+	p.addCommand = vi.fn();
+	p.addRibbonIcon = vi.fn() as any;
+	p.addSettingTab = vi.fn();
+	await p.onload();
+	handlers.rename({ path: "moved/A.md" }, "books");
+	expect(p.settings.noteDestinations.ABC.invalidated).toBe("renamed");
+	handlers.delete({ path: "other/B.md" });
+	expect(p.settings.noteDestinations.OTHER.invalidated).toBe("deleted");
+	await p.saveSettings();
+	expect(p.saveData).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			noteDestinations: {
+				ABC: { path: "books/A.md", ctime: 10, invalidated: "renamed" },
+				OTHER: { path: "other/B.md", ctime: 20, invalidated: "deleted" },
+			},
+		}),
+	);
+	expect(p.addCommand).toHaveBeenCalledWith(
+		expect.objectContaining({ id: "choose-kindle-sync-destination" }),
+	);
+});

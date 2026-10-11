@@ -455,3 +455,41 @@ it.each(["missing", "asin-changed"])(
 		).toBe(1);
 	},
 );
+
+it("updates an explicitly selected ASIN-only note and leaves the complete alternative unchanged", async () => {
+	const a = "books/Minimal.md",
+		b = "books/Full.md",
+		minimal = "---\nASIN: ABC\ncustom: keep\n---\nMy memo [[Link]]\n",
+		full = "---\nASIN: ABC\nbookId: saved\ntitle: Book\n---\nOther memo\n";
+	const io = {
+		...memoryVault({ [a]: minimal, [b]: full }),
+		identity: () => 10,
+	};
+	expect((await saveBookNotes(io, config, [book], [highlight])).held).toBe(1);
+	const cfg = { ...config, noteDestinations: { ABC: { path: a, ctime: 10 } } };
+	expect((await saveBookNotes(io, cfg, [book], [highlight])).added).toBe(1);
+	expect(io.files.get(a)).toContain("My memo [[Link]]");
+	expect(io.files.get(b)).toBe(full);
+	expect((await saveBookNotes(io, cfg, [book], [highlight])).added).toBe(0);
+});
+
+it("holds a selected file that disappears while its snapshot is being read", async () => {
+	const path = "books/A.md",
+		source = "---\nASIN: ABC\nbookId: saved\ntitle: Book\n---\nMemo\n";
+	const io = { ...memoryVault({ [path]: source }), identity: () => 10 };
+	io.read = async () => {
+		io.files.delete(path);
+		throw Error("ENOENT");
+	};
+	const result = await saveBookNotes(
+		io,
+		{ ...config, noteDestinations: { ABC: { path, ctime: 10 } } },
+		[book],
+		[highlight],
+	);
+	expect(result).toMatchObject({ held: 1, failed: 0, created: 0 });
+	expect(result.outcomes?.[0]).toMatchObject({
+		reason: "destination-missing",
+		status: "held",
+	});
+});

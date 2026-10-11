@@ -1,5 +1,6 @@
 import { NoteDestinationModal } from "./modals/NoteDestinationModal";
 import {
+	NoteDestination,
 	groupNoteDestinations,
 	invalidateNoteDestinations,
 	noteAsin,
@@ -53,6 +54,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 	private disposed = false;
 	private releaseBackgroundExecution: (() => void) | undefined;
 	private settingsSave: Promise<void> = Promise.resolve();
+	private pendingDestination?: { asin: string; selection: NoteDestination };
 	private diagnosticRevision = 0;
 	private previews = new WeakMap<MigrationPreview, string>();
 	lastSyncResult: Awaited<ReturnType<typeof saveBookNotes>> | undefined;
@@ -160,11 +162,28 @@ export default class KindleHighlightsPlugin extends Plugin {
 		};
 		validatePropertyNames(this.settings.propertyNames);
 	}
-	async saveSettings() {
+	async saveSettings(destination?: {
+		asin: string;
+		selection: NoteDestination;
+	}) {
 		const snapshot = JSON.parse(JSON.stringify(this.settings));
 		const saving = this.settingsSave
 			.catch(() => {})
-			.then(() => this.saveData(snapshot));
+			.then(async () => {
+				// Destination changes commit only after persistence succeeds. A queued ordinary
+				// settings snapshot must include the latest committed table, never a provisional one.
+				snapshot.noteDestinations = JSON.parse(
+					JSON.stringify(this.settings.noteDestinations),
+				);
+				if (destination)
+					snapshot.noteDestinations[destination.asin] = {
+						...destination.selection,
+					};
+				await this.saveData(snapshot);
+				if (destination)
+					this.settings.noteDestinations[destination.asin] =
+						destination.selection;
+			});
 		this.settingsSave = saving;
 		await saving;
 	}
@@ -332,14 +351,20 @@ export default class KindleHighlightsPlugin extends Plugin {
 	}
 
 	async invalidateDestinations(path: string, reason: "renamed" | "deleted") {
-		if (
-			!invalidateNoteDestinations(
-				this.settings.noteDestinations,
-				path,
-				reason,
-			)
-		)
-			return;
+		const changed = invalidateNoteDestinations(
+			this.settings.noteDestinations,
+			path,
+			reason,
+		);
+		const pending = this.pendingDestination;
+		const pendingChanged = pending
+			? invalidateNoteDestinations(
+					{ [pending.asin]: pending.selection },
+					path,
+					reason,
+				)
+			: false;
+		if (!changed && !pendingChanged) return;
 		try {
 			await this.saveSettings();
 		} catch {
@@ -378,21 +403,12 @@ export default class KindleHighlightsPlugin extends Plugin {
 				) !== asin
 			)
 				throw new Error("Destination preview is stale");
-			const previous = this.settings.noteDestinations[asin];
-			const selection: import("./services/note-destination").NoteDestination = { path, ctime };
-			this.settings.noteDestinations[asin] = selection;
-			try {
-				await this.saveSettings();
-			} catch (error) {
-				// If a vault event invalidated the pending selection, retain that tombstone.
-				if (!selection.invalidated) {
-					if (previous)
-						this.settings.noteDestinations[asin] = previous;
-					else delete this.settings.noteDestinations[asin];
-				}
-				throw error;
-			}
+			const selection: NoteDestination = { path, ctime };
+			const pending = { asin, selection };
+			this.pendingDestination = pending;
+			await this.saveSettings(pending);
 		} finally {
+			this.pendingDestination = undefined;
 			this.busy = false;
 		}
 	}
@@ -429,10 +445,11 @@ export default class KindleHighlightsPlugin extends Plugin {
 						this.settings.propertyNameHistory,
 					),
 					async (asin, note) => {
-                        // The preview's IO retains the original TFile pin, including same-ctime replacements.
-                        if(io.identity?.(note.path)!==note.ctime)throw new Error("Destination preview is stale");
-                        await this.selectNoteDestination(asin, note);
-                    },
+						// The preview's IO retains the original TFile pin, including same-ctime replacements.
+						if (io.identity?.(note.path) !== note.ctime)
+							throw new Error("Destination preview is stale");
+						await this.selectNoteDestination(asin, note);
+					},
 				).open();
 		} catch {
 			new Notice(t("destinations.failed"));
@@ -452,11 +469,9 @@ export default class KindleHighlightsPlugin extends Plugin {
 		const settings: KindleHighlightsSettings = JSON.parse(
 			JSON.stringify(this.settings),
 		);
-		// Vault events can invalidate a selection while fetch or atomic save is in flight.
-		settings.noteDestinations = this.settings.noteDestinations;
-		const destinationsBeforeSave = JSON.stringify(
-			settings.noteDestinations,
-		);
+        // Vault events can invalidate destinations while fetching or saving.
+        settings.noteDestinations=this.settings.noteDestinations;
+        const destinationsBeforeSave=JSON.stringify(settings.noteDestinations);
 		const diagnostics: NonNullable<
 			KindleHighlightsPlugin["lastSyncDiagnostics"]
 		> = {
@@ -482,20 +497,11 @@ export default class KindleHighlightsPlugin extends Plugin {
 			exclusions = rows.filter((row) => row.reason !== "duplicate-asin");
 			excludedCount = exclusions.length;
 			for (const _row of exclusions)
-				tracker.addIssue({
-					phase: "fetch",
-					message: "Notebook library row excluded",
-				});
+				tracker.addIssue({ phase: "fetch", message: "Notebook library row excluded" });
 		};
 		emitter.on(
 			"fetch:booklist:end",
-			({
-				totalBooks: total,
-				excludedRows = [],
-			}: {
-				totalBooks: number;
-				excludedRows?: FetchDiagnostics["excludedRows"];
-			}) => {
+			({ totalBooks: total, excludedRows = [] }: { totalBooks: number; excludedRows?: FetchDiagnostics["excludedRows"] }) => {
 				totalBooks = total;
 				trackExclusions(excludedRows);
 				tracker.startPhase("fetch", total);
@@ -530,8 +536,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 				total: totalBooks === null ? null : totalBooks + excludedCount,
 				completed: saving ? tracker.state.counts.completed : 0,
 				failed:
-					excludedCount +
-					fetchFailed +
+					excludedCount + fetchFailed +
 					(saving
 						? tracker.state.counts.failed
 						: phase === "metadata" && tracker.state.currentBook
@@ -541,8 +546,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 			};
 		};
 		try {
-			this.releaseBackgroundExecution = releaseBackgroundExecution =
-				acquireBackgroundExecution();
+			this.releaseBackgroundExecution = releaseBackgroundExecution = acquireBackgroundExecution();
 			new SyncProgressModal(this.app, tracker).open();
 			if (!(await this.kindleApiService.login(settings.amazonRegion))) {
 				tracker.addIssue({
@@ -565,10 +569,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 				);
 			fetchFailed = failedBooks;
 			totalBooks ??= books.length + failedBooks;
-			trackExclusions(
-				this.kindleApiService.lastFetchDiagnostics?.excludedRows ??
-					exclusions,
-			);
+			trackExclusions(this.kindleApiService.lastFetchDiagnostics?.excludedRows ?? exclusions);
 			if (this.disposed) return;
 			if (settings.downloadMetadata) {
 				phase = "metadata";
@@ -594,23 +595,14 @@ export default class KindleHighlightsPlugin extends Plugin {
 				(book) => tracker.startBook(book.title),
 				(book, index, outcome) => {
 					for (const issue of outcome.issues) tracker.addIssue(issue);
-					tracker.settleBook(
-						String(index),
-						outcome.status,
-						book.title,
-					);
+					tracker.settleBook(String(index), outcome.status, book.title);
 				},
 			);
 			diagnostics.noteSave = JSON.parse(JSON.stringify(result));
-			if (
-				JSON.stringify(settings.noteDestinations) !==
-				destinationsBeforeSave
-			)
+			if (JSON.stringify(settings.noteDestinations) !== destinationsBeforeSave)
 				await this.saveSettings();
 			for (const row of exclusions) {
-				result.errors.push(
-					`Notebook row ${row.row}${row.asin ? ` (ASIN: ${row.asin})` : ""}: ${row.reason}`,
-				);
+				result.errors.push(`Notebook row ${row.row}${row.asin ? ` (ASIN: ${row.asin})` : ""}: ${row.reason}`);
 			}
 			for (const issue of result.issues ?? []) tracker.addIssue(issue);
 			finalCounts = overallCounts();
@@ -650,31 +642,14 @@ export default class KindleHighlightsPlugin extends Plugin {
 						: "failed",
 				finalCounts ?? overallCounts(),
 			);
-			const state = fetchStarted
-				? this.kindleApiService.lastFetchDiagnostics?.library.status
-				: undefined;
-			new Notice(
-				t(
-					state === "unconfirmed"
-						? "sync.libraryUnconfirmed"
-						: state === "load-failed"
-							? "sync.libraryLoadFailed"
-							: "sync.safeFailure",
-				),
-			);
+			const state = fetchStarted ? this.kindleApiService.lastFetchDiagnostics?.library.status : undefined;
+			new Notice(t(state === "unconfirmed" ? "sync.libraryUnconfirmed" : state === "load-failed" ? "sync.libraryLoadFailed" : "sync.safeFailure"));
 		} finally {
-			try {
-				releaseBackgroundExecution?.();
-			} catch {
+			try { releaseBackgroundExecution?.(); }
+			catch {
 				diagnostics.status = "failed";
-				console.error(
-					"Kindle background timer setting could not be restored",
-				);
-				tracker.addIssue({
-					phase: "session",
-					message:
-						"Desktop background timer setting could not be restored",
-				});
+				console.error("Kindle background timer setting could not be restored");
+				tracker.addIssue({ phase: "session", message: "Desktop background timer setting could not be restored" });
 				tracker.finish("failed", finalCounts ?? overallCounts());
 				new Notice(t("sync.safeFailure"));
 			}
@@ -684,12 +659,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 				tracker.finish("interrupted", finalCounts ?? overallCounts());
 			}
 			if (diagnostics.status !== "login-cancelled")
-				diagnostics.status =
-					tracker.state.status === "completed"
-						? "complete"
-						: tracker.state.status === "partial"
-							? "partial"
-							: "failed";
+				diagnostics.status = tracker.state.status === "completed" ? "complete" : tracker.state.status === "partial" ? "partial" : "failed";
 			if (tracker.state.status !== "completed") {
 				if (!tracker.state.issues.length)
 					tracker.addIssue({ phase, message: "Unexpected error" });

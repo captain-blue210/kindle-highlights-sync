@@ -2,7 +2,7 @@ import type { Book } from "../models";
 import {
 	DEFAULT_PROPERTY_NAMES,
 	PropertyNames,
-	readBookProperties,
+	readNoteAsin,
 } from "./note-properties";
 import { findExistingNote, NoteSnapshot } from "./note-sync";
 
@@ -82,7 +82,7 @@ export function noteAsin(
 	history: PropertyNames[],
 ): string | undefined {
 	try {
-		return readBookProperties(note.content, names, history)?.asin;
+		return readNoteAsin(note.content, names, history);
 	} catch {
 		return undefined;
 	}
@@ -147,6 +147,12 @@ export function resolveNoteDestination(
 		return { status: "existing", note, explicit: true };
 	}
 	if (candidates.length > 1) return hold("destination-unselected");
+	if (candidates.length === 1)
+		return {
+			status: "existing",
+			note: notes.find((n) => n.path === candidates[0])!,
+			explicit: false,
+		};
 	const note = findExistingNote(notes, book, names, history);
 	return note
 		? { status: "existing", note, explicit: false }
