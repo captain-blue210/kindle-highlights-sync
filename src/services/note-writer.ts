@@ -1,3 +1,10 @@
+import {
+	DestinationInvalidation,
+	DestinationHoldReason,
+	DestinationResolution,
+	NoteDestinations,
+	resolveNoteDestination,
+} from "./note-destination";
 import { BookStatus, SyncIssue, safeErrorMessage } from "./sync-progress";
 import type { Book, Highlight } from "../models";
 import {
@@ -8,7 +15,6 @@ import {
 } from "./note-properties";
 import {
 	bookProperties,
-	findExistingNote,
 	NoteSnapshot,
 	renderHighlight,
 	syncNoteContent,
@@ -16,12 +22,15 @@ import {
 import { renderTemplate } from "./template-renderer";
 
 export interface NoteWriterIO {
+	/** Stable creation time; explicit selections require this capability. */
+	identity?(path: string): number | undefined;
 	list(): string[];
 	read(path: string): Promise<string>;
 	create(path: string, content: string): Promise<void>;
 	process(path: string, fn: (content: string) => string): Promise<void>;
 }
 export interface NoteWriterSettings {
+	noteDestinations?: NoteDestinations;
 	outputDirectory: string;
 	templateContent: string;
 	propertyNames: PropertyNames;
@@ -32,6 +41,7 @@ export interface NoteSaveOutcome {
 	status: "created" | "updated" | "held" | "failed" | "skipped-no-highlights";
 	path?: string;
 	reason?: string;
+	candidates?: string[];
 }
 export function normalizeOutputDirectory(path: string): string {
 	const normalized = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
@@ -89,7 +99,11 @@ export async function saveBookNotes(
 	};
 	for (const path of paths) {
 		try {
-			notes.push({ path, content: await io.read(path) });
+			notes.push({
+				path,
+				ctime: io.identity?.(path),
+				content: await io.read(path),
+			});
 		} catch {
 			result.errors.push(`${path}: unreadable note`);
 			scanIssues.push({
@@ -118,23 +132,60 @@ export async function saveBookNotes(
 		onBook?.(book, index);
 		const bookHighlights = highlights.filter((h) => h.bookId === book.id);
 		const outcome: BookOutcome = { status: "success", issues: [] };
+		let resolution: DestinationResolution | undefined;
 		try {
-			const existing = findExistingNote(
+			resolution = resolveNoteDestination(
 				notes,
 				book,
+				settings.noteDestinations,
 				settings.propertyNames,
 				settings.propertyNameHistory,
 			);
+			if (resolution.status === "held")
+				throw new DestinationHeld(resolution);
+			const existing =
+				resolution.status === "existing" ? resolution.note : undefined;
 			if (existing) {
 				let added = 0,
 					warnings: string[] = [];
 				await io.process(existing.path, (current) => {
+					if (
+						resolution?.status === "existing" &&
+						resolution.explicit
+					) {
+						const fresh = resolveNoteDestination(
+							[
+								{
+									path: existing.path,
+									content: current,
+									ctime: io.identity?.(existing.path),
+								},
+							],
+							book,
+							settings.noteDestinations,
+							settings.propertyNames,
+							settings.propertyNameHistory,
+						);
+						if (fresh.status === "held")
+							throw new DestinationHeld({
+								...fresh,
+								candidates: notes
+									.filter(
+										(n) =>
+											safeProperties(n.content, settings)
+												?.asin === book.asin,
+									)
+									.map((n) => n.path)
+									.sort(),
+							});
+					}
 					// Read fresh properties inside the atomic process, never apply a stale snapshot.
 					const properties = readBookProperties(
 						current,
 						settings.propertyNames,
 						settings.propertyNameHistory,
 					);
+
 					if (
 						!properties ||
 						(properties.asin && properties.asin !== book.asin)
@@ -151,7 +202,8 @@ export async function saveBookNotes(
 					);
 					added = merged.added;
 					warnings = merged.warnings;
-					outcome.status = merged.content === current ? "unchanged" : "success";
+					outcome.status =
+						merged.content === current ? "unchanged" : "success";
 					existing.content = merged.content;
 					return merged.content;
 				});
@@ -243,24 +295,87 @@ export async function saveBookNotes(
 				result.added += bookHighlights.length;
 			}
 		} catch (error) {
-			result.failed++;
-			result.outcomes.push({
-				asin: book.asin,
-				status: "failed",
-				reason:
-					error instanceof Error &&
-					error.message === "Multiple notes have the same ASIN"
-						? "duplicate-note-asin"
-						: "note-save-failed",
-			});
-			outcome.status = "failed";
-			const message = safeErrorMessage(error);
-			outcome.issues.push({
-				phase: "save",
-				bookTitle: book.title,
-				message,
-			});
-			result.errors.push(`${book.title}: ${message}`);
+			if (
+				resolution?.status === "existing" &&
+				resolution.explicit &&
+				error instanceof Error &&
+				[
+					"Note unavailable",
+					"Note identity changed during synchronization",
+				].includes(error.message)
+			) {
+				error = new DestinationHeld({
+					reason: io.list().includes(resolution.note.path)
+						? "destination-identity-changed"
+						: "destination-missing",
+					candidates: notes
+						.filter(
+							(n) =>
+								safeProperties(n.content, settings)?.asin ===
+								book.asin,
+						)
+						.map((n) => n.path)
+						.sort(),
+					selectedPath: resolution.note.path,
+				});
+			}
+			if (error instanceof DestinationHeld) {
+				result.held++;
+				const { reason, candidates, selectedPath } = error.resolution;
+				const selected = settings.noteDestinations?.[book.asin];
+				if (
+					selected &&
+					selectedPath === selected.path &&
+					!selected.invalidated
+				) {
+					selected.invalidated = reason.replace(
+						"destination-",
+						"",
+					) as DestinationInvalidation;
+				}
+				result.outcomes.push({
+					asin: book.asin,
+					status: "held",
+					reason,
+					candidates,
+					...(selectedPath ? { path: selectedPath } : {}),
+				});
+				outcome.status = "held";
+				outcome.issues.push({
+					phase: "save",
+					bookTitle: book.title,
+					...(selectedPath ? { path: selectedPath } : {}),
+					message: reason,
+				});
+				for (const path of candidates)
+					outcome.issues.push({
+						phase: "save",
+						bookTitle: book.title,
+						path,
+						message:
+							"Destination candidate; choose a sync destination in settings",
+					});
+				result.errors.push(`${book.title}: ${reason}`);
+			} else {
+				result.failed++;
+				result.outcomes.push({
+					asin: book.asin,
+					status: "failed",
+					reason:
+						error instanceof Error &&
+						error.message === "Multiple notes have the same ASIN"
+							? "duplicate-note-asin"
+							: "note-save-failed",
+				});
+				outcome.status = "failed";
+				const message = safeErrorMessage(error);
+				outcome.issues.push({
+					phase: "save",
+					bookTitle: book.title,
+					message,
+				});
+				result.errors.push(`${book.title}: ${message}`);
+			}
 		} finally {
 			result.issues.push(...outcome.issues);
 			onBookSettled?.(book, index, outcome);
@@ -277,5 +392,17 @@ function safeProperties(content: string, settings: NoteWriterSettings) {
 		);
 	} catch {
 		return null;
+	}
+}
+
+class DestinationHeld extends Error {
+	constructor(
+		readonly resolution: {
+			reason: DestinationHoldReason;
+			candidates: string[];
+			selectedPath?: string;
+		},
+	) {
+		super(resolution.reason);
 	}
 }

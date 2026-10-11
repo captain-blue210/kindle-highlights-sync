@@ -226,5 +226,17 @@
     },
     "saveFailed": "Could not save the error record. It remains available in settings during this session.",
     "clearFailed": "Could not clear the error record."
-  }
+  },
+  "destinations": {
+  "title": "Duplicate ASIN sync destinations",
+  "description": "Choose one destination for books with multiple notes sharing an ASIN. Unselected, deleted, renamed or changed destinations are held until you select again. Other notes stay unchanged.",
+  "empty": "No duplicate notes or saved destinations.",
+  "selected": "Current destination: {{path}}",
+  "reselect": "The destination is invalid. Review the candidates and select again.",
+  "choose": "Choose sync destination",
+  "unselected": "Unselected (held)",
+  "save": "Save destination",
+  "saved": "Saved. Run the sync command again.",
+  "failed": "Could not verify or save the destination. Reopen this dialog and try again."
+}
 }

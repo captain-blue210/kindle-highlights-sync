@@ -154,6 +154,7 @@ export function mergeHighlights(
 	};
 }
 export interface NoteSnapshot {
+	ctime?: number;
 	path: string;
 	content: string;
 }

@@ -241,3 +241,217 @@ it("reports an identical existing note as unchanged while retaining its successf
  expect(io.files.get("books/Renamed Book.md")).toBe(original);
  expect(outcomes).toEqual(["unchanged"]);
 });
+
+
+describe("explicit duplicate ASIN destinations", () => {
+	const a = "books/Chosen name.md",
+		b = "books/Other name.md";
+	const source =
+		"---\nbookId: saved\ntitle: Edited\nASIN: ABC\ncustom: [keep, me]\n---\n\n> [[Related]] Edited abc ^ref-19495\n\nPersonal memo [[Other]]\n";
+	const other = source + "Other personal memo\n";
+	function duplicateVault() {
+		return {
+			...memoryVault({ [a]: source, [b]: other }),
+			identity: (path: string): number => (path === a ? 10 : 20),
+		};
+	}
+	const selected = {
+		...config,
+		noteDestinations: { ABC: { path: a, ctime: 10 } },
+	};
+	it("holds unselected duplicates with all candidate paths and no completion", async () => {
+		const io = duplicateVault(),
+			statuses: string[] = [];
+		const result = await saveBookNotes(
+			io,
+			config,
+			[book],
+			[highlight],
+			undefined,
+			(_b, _i, o) => statuses.push(o.status),
+		);
+		expect(result).toMatchObject({
+			held: 1,
+			failed: 0,
+			created: 0,
+			updated: 0,
+			added: 0,
+		});
+		expect(result.outcomes).toEqual([
+			{
+				asin: "ABC",
+				status: "held",
+				reason: "destination-unselected",
+				candidates: [a, b],
+			},
+		]);
+		expect(statuses).toEqual(["held"]);
+		expect(
+			result.issues?.some((i) => i.message.includes("destination-unselected")),
+		).toBe(true);
+		expect(Object.fromEntries(io.files)).toEqual({ [a]: source, [b]: other });
+	});
+	it("resumes after hold, updates only the selected snapshot and is idempotent twice", async () => {
+		const io = duplicateVault();
+		const hs = [
+			highlight,
+			{ ...highlight, id: "new", text: "new highlight", location: "20" },
+		];
+		expect((await saveBookNotes(io, config, [book], hs)).held).toBe(1);
+		expect(
+			(
+				await saveBookNotes(
+					io,
+					JSON.parse(JSON.stringify(selected)),
+					[book],
+					hs,
+				)
+			).added,
+		).toBe(1);
+		const after = io.files.get(a)!;
+		expect(splitNote(after).body.startsWith(splitNote(source).body)).toBe(true);
+		expect(
+			(
+				await saveBookNotes(
+					io,
+					JSON.parse(JSON.stringify(selected)),
+					[book],
+					hs,
+				)
+			).added,
+		).toBe(0);
+		expect(io.files.get(a)).toBe(after);
+		expect(io.files.get(b)).toBe(other);
+		expect([...io.files.keys()]).toEqual([a, b]);
+	});
+	it.each(["missing", "asin-changed", "asin-removed", "replaced", "renamed"])(
+		"holds %s targets without falling back to the remaining candidate",
+		async (kind) => {
+			const io = duplicateVault();
+			let reason = "destination-identity-changed";
+			if (kind === "missing") {
+				io.files.delete(a);
+				reason = "destination-missing";
+			}
+			if (kind === "asin-changed")
+				io.files.set(a, source.replace("ASIN: ABC", "ASIN: OTHER"));
+			if (kind === "asin-removed")
+				io.files.set(a, source.replace("ASIN: ABC\n", ""));
+			if (kind === "replaced") io.identity = () => 99;
+			const settings = JSON.parse(JSON.stringify(selected));
+			if (kind === "renamed") {
+				settings.noteDestinations.ABC.invalidated = "renamed";
+				reason = "destination-renamed";
+			}
+			const before = Object.fromEntries(io.files);
+			const r = await saveBookNotes(io, settings, [book], [highlight]);
+			expect(r).toMatchObject({ held: 1, failed: 0, updated: 0, created: 0 });
+			expect(r.outcomes?.[0]).toMatchObject({
+				status: "held",
+				reason,
+				path: a,
+			});
+			expect(Object.fromEntries(io.files)).toEqual(before);
+		},
+	);
+	it("holds a selected ASIN removed inside atomic process without changing any properties", async () => {
+		const io = duplicateVault();
+		const original = io.process;
+		io.process = async (p, fn) => {
+			io.files.set(p, source.replace("ASIN: ABC\n", ""));
+			await original(p, fn);
+		};
+		const r = await saveBookNotes(
+			io,
+			JSON.parse(JSON.stringify(selected)),
+			[book],
+			[highlight],
+		);
+		expect(r).toMatchObject({ held: 1, failed: 0, updated: 0 });
+		expect(r.outcomes?.[0].reason).toBe("destination-identity-changed");
+		expect(io.files.get(a)).toBe(source.replace("ASIN: ABC\n", ""));
+		expect(io.files.get(b)).toBe(other);
+	});
+	it("holds a selection invalidated after the scan and before process", async () => {
+		const io = duplicateVault(),
+			settings = JSON.parse(JSON.stringify(selected));
+		const original = io.process;
+		io.process = async (p, fn) => {
+			settings.noteDestinations.ABC.invalidated = "deleted";
+			await original(p, fn);
+		};
+		const r = await saveBookNotes(io, settings, [book], [highlight]);
+		expect(r).toMatchObject({ held: 1, failed: 0, updated: 0 });
+		expect(Object.fromEntries(io.files)).toEqual({ [a]: source, [b]: other });
+	});
+});
+
+it.each(["Note unavailable", "Note identity changed during synchronization"])(
+	"holds a selected file lost between resolution and atomic process: %s",
+	async (message) => {
+		const path = "books/A.md",
+			source = "---\nASIN: ABC\nbookId: saved\ntitle: Book\n---\nMemo\n";
+		const io = { ...memoryVault({ [path]: source }), identity: () => 10 };
+		io.process = async () => {
+			throw Error(message);
+		};
+		const r = await saveBookNotes(
+			io,
+			{ ...config, noteDestinations: { ABC: { path, ctime: 10 } } },
+			[book],
+			[highlight],
+		);
+		expect(r).toMatchObject({ held: 1, failed: 0, updated: 0 });
+		expect(io.files.get(path)).toBe(source);
+	},
+);
+it("holds malformed selected properties inside process", async () => {
+	const path = "books/A.md",
+		source = "---\nASIN: ABC\nbookId: saved\ntitle: Book\n---\nMemo\n",
+		broken = "---\nASIN: [\n---\nMemo\n";
+	const io = { ...memoryVault({ [path]: source }), identity: () => 10 };
+	io.process = async (p, fn) => {
+		io.files.set(p, broken);
+		io.files.set(p, fn(broken));
+	};
+	const r = await saveBookNotes(
+		io,
+		{ ...config, noteDestinations: { ABC: { path, ctime: 10 } } },
+		[book],
+		[highlight],
+	);
+	expect(r).toMatchObject({ held: 1, failed: 0, updated: 0 });
+	expect(io.files.get(path)).toBe(broken);
+});
+
+it.each(["missing", "asin-changed"])(
+	"requires reselection after detecting %s even if the old destination returns",
+	async (kind) => {
+		const a = "books/A.md",
+			b = "books/B.md",
+			source = "---\nASIN: ABC\nbookId: saved\ntitle: Book\n---\nMemo\n";
+		const io = {
+			...memoryVault({ [a]: source, [b]: source }),
+			identity: () => 10,
+		};
+		const cfg = {
+			...config,
+			noteDestinations: { ABC: { path: a, ctime: 10 } },
+		};
+		if (kind === "missing") io.files.delete(a);
+		else io.files.set(a, source.replace("ASIN: ABC", "ASIN: OTHER"));
+		expect((await saveBookNotes(io, cfg, [book], [highlight])).held).toBe(1);
+		io.files.set(a, source);
+		const loaded = JSON.parse(JSON.stringify(cfg));
+		expect((await saveBookNotes(io, loaded, [book], [highlight])).held).toBe(1);
+		expect(io.files.get(a)).toBe(source);
+		expect(io.files.get(b)).toBe(source);
+		const reselected = {
+			...config,
+			noteDestinations: { ABC: { path: a, ctime: 10 } },
+		};
+		expect(
+			(await saveBookNotes(io, reselected, [book], [highlight])).added,
+		).toBe(1);
+	},
+);
