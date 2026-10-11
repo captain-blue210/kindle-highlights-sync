@@ -7,5 +7,299 @@ If your plugin does not need CSS, delete this file.
 
 */
 
-.kindle-migration-preview { max-height: 55vh; overflow: auto; }
-.kindle-migration-preview pre { white-space: pre-wrap; }
+.kindle-migration-preview {
+	max-height: 55vh;
+	overflow: auto;
+}
+.kindle-migration-preview pre {
+	white-space: pre-wrap;
+}
+
+/* Centered progress presentation, inspired by hadynz/obsidian-kindle-plugin. */
+.kindle-sync-modal {
+	width: min(600px, 92vw);
+}
+.kindle-sync-modal [hidden] {
+	display: none !important;
+}
+.kindle-sync-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 12px;
+	margin: 32px 0;
+	text-align: center;
+}
+.kindle-sync-state-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	width: 56px;
+	height: 56px;
+	border-radius: 50%;
+	color: var(--background-primary);
+	background: var(--text-success, var(--interactive-accent));
+}
+.kindle-sync-state-icon svg {
+	width: 30px;
+	height: 30px;
+}
+.kindle-sync-state-icon.is-running {
+	width: 90px;
+	height: 90px;
+	color: var(--interactive-accent);
+	background: transparent;
+}
+.kindle-sync-dot {
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: currentColor;
+	animation: kindle-sync-jump 1.6s ease-in-out infinite;
+}
+.kindle-sync-dot:nth-child(2) {
+	animation-delay: 160ms;
+}
+.kindle-sync-dot:nth-child(3) {
+	animation-delay: 320ms;
+}
+.kindle-sync-state-icon.is-failed,
+.kindle-sync-state-icon.is-partial {
+	color: var(--text-warning, var(--text-error));
+	background: var(--background-secondary);
+}
+.kindle-sync-state-icon.is-interrupted {
+	color: var(--text-muted);
+	background: var(--background-secondary);
+}
+.kindle-sync-status {
+	font-size: 1.2em;
+}
+.kindle-sync-current-book {
+	width: 100%;
+	max-width: 450px;
+	color: var(--text-muted);
+	line-height: 1.6;
+	overflow-wrap: anywhere;
+}
+.kindle-sync-current-book strong {
+	color: var(--text-normal);
+}
+.kindle-sync-result-count {
+	display: flex;
+	align-items: baseline;
+	justify-content: center;
+	gap: 8px;
+}
+.kindle-sync-result-count strong {
+	font-size: 2.4em;
+	font-weight: 500;
+	line-height: normal;
+	color: var(--interactive-accent);
+	font-variant-numeric: tabular-nums;
+}
+.kindle-sync-result-count span {
+	font-size: 1.2em;
+}
+.kindle-sync-progress-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: min(400px, 100%);
+	margin-top: 2px;
+}
+.kindle-sync-progress {
+	flex: 1;
+	width: 100%;
+	min-width: 0;
+	height: 6px;
+	appearance: none;
+	border: 0;
+	border-radius: 3px;
+	overflow: hidden;
+	background: var(--background-modifier-border);
+	accent-color: var(--interactive-accent);
+}
+.kindle-sync-progress::-webkit-progress-bar {
+	background: var(--background-modifier-border);
+	border-radius: 3px;
+}
+.kindle-sync-progress::-webkit-progress-value {
+	background: var(--interactive-accent);
+	border-radius: 3px;
+	transition: width 300ms ease;
+}
+.kindle-sync-progress:not([value])::-webkit-progress-bar {
+	background: linear-gradient(90deg, var(--background-modifier-border), var(--interactive-accent), var(--background-modifier-border));
+	background-size: 200% 100%;
+	animation: kindle-sync-pulse 2s linear infinite;
+}
+.kindle-sync-count-label,
+.kindle-sync-secondary-counts,
+.kindle-sync-duration {
+	color: var(--text-muted);
+	font-size: 0.85em;
+	font-variant-numeric: tabular-nums;
+}
+.kindle-sync-count-label {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+.kindle-sync-duration {
+	color: var(--text-faint);
+}
+.kindle-sync-log {
+	width: 100%;
+	max-width: 520px;
+	margin: 12px auto 0;
+	padding: 10px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-secondary);
+}
+.kindle-sync-log-header,
+.kindle-sync-copy-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.kindle-sync-log-header {
+	justify-content: space-between;
+	margin-bottom: 8px;
+	color: var(--text-muted);
+	font-size: 0.85em;
+}
+.kindle-sync-copy-controls {
+	justify-content: flex-end;
+	flex-wrap: wrap;
+}
+.kindle-sync-copy-log {
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	padding: 4px 6px;
+	color: var(--text-muted);
+	font-size: inherit;
+}
+.kindle-sync-copy-log:hover {
+	color: var(--text-normal);
+}
+.kindle-sync-log-body {
+	height: 160px;
+	overflow: auto;
+	overflow-anchor: none;
+}
+.kindle-sync-log-line {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	font-size: 0.9em;
+	line-height: 1.5;
+	padding: 2px 0;
+}
+.kindle-sync-log-line.is-warning {
+	color: var(--text-warning, var(--text-error));
+}
+.kindle-sync-log-text {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+.kindle-sync-log-book {
+	font-weight: 600;
+}
+.kindle-sync-log-delta {
+	flex: 0 0 64px;
+	text-align: right;
+	color: var(--text-faint);
+	font-size: 0.85em;
+	font-variant-numeric: tabular-nums;
+	font-family: var(--font-monospace);
+}
+.kindle-sync-errors {
+	margin-top: 20px;
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 14px;
+}
+.kindle-sync-errors summary {
+	cursor: pointer;
+}
+.kindle-sync-issue-list {
+	list-style: none;
+	padding: 0;
+	margin: 14px 0;
+	max-height: 36vh;
+	overflow: auto;
+}
+.kindle-sync-issue-list li {
+	border-left: 3px solid var(--text-warning, var(--text-error));
+	padding: 8px 12px;
+	margin-bottom: 10px;
+	background: var(--background-secondary);
+	border-radius: 0 6px 6px 0;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+.kindle-sync-issue-context {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin-bottom: 4px;
+}
+.kindle-sync-modal .modal-button-container {
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px;
+}
+.kindle-sync-close-hint {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin: 0;
+}
+.kindle-diagnostics-card {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 14px;
+	background: var(--background-primary);
+	margin-bottom: 24px;
+	padding: 18px;
+}
+.kindle-diagnostics-card h3 {
+	margin-top: 0;
+}
+.kindle-diagnostics-meta,
+.kindle-diagnostics-counts {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	line-height: 1.6;
+}
+@keyframes kindle-sync-jump {
+	0%, 60%, 100% { transform: translateY(0); }
+	30% { transform: translateY(-18px); }
+}
+@keyframes kindle-sync-pulse {
+	to { background-position: -200% 0; }
+}
+@media (max-width: 480px) {
+	.kindle-sync-progress-row {
+	 flex-wrap: wrap;
+	 justify-content: center;
+	}
+	.kindle-sync-progress {
+	 flex-basis: 100%;
+	}
+	.kindle-sync-log-header {
+	 align-items: flex-start;
+	}
+	.kindle-sync-log-delta {
+	 flex-basis: 52px;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.kindle-sync-modal *,
+	.kindle-sync-modal *::before,
+	.kindle-sync-modal *::after {
+		animation: none !important;
+		transition: none !important;
+	}
+}

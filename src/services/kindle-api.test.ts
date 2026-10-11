@@ -4,6 +4,7 @@ import * as cheerio from "cheerio";
 vi.mock("obsidian", () => ({ Notice: vi.fn() }));
 vi.mock("../utils/remote-loader", () => ({ loadRemoteDom: vi.fn() }));
 import { loadRemoteDom } from "../utils/remote-loader";
+import { Notice } from "obsidian";
 import { KindleApiService } from "./kindle-api";
 const notebook = () =>
 	'<div id="kp-notebook-library">' +
@@ -79,7 +80,11 @@ it("accepts genuine annotation fragments including an empty final page", async (
 						'annotations-next-page-start" value=""',
 						'annotations-next-page-start" value="next"',
 					);
-		return { dom: cheerio.load(html) as unknown as cheerio.CheerioAPI, html, finalUrl: url };
+		return {
+			dom: cheerio.load(html) as unknown as cheerio.CheerioAPI,
+			html,
+			finalUrl: url,
+		};
 	});
 	const result = await readyApi().fetchHighlights(
 		"co.jp",
@@ -124,3 +129,36 @@ it.each(["unknown", "login", "wrong-book"])(
 		expect(result.highlights).toHaveLength(0);
 	},
 );
+
+it("settles each fetched book once and preserves a safe page failure reason", async () => {
+	vi.mocked(loadRemoteDom).mockImplementation(async (url) => {
+		if (url.includes("asin=ASIN2&"))
+			throw Error("Notebook navigation timed out");
+		const html = url.includes("?") ? fragment("abc") : notebook();
+		return {
+			dom: cheerio.load(html) as unknown as cheerio.CheerioAPI,
+			html,
+			finalUrl: url,
+		};
+	});
+	const emitter = new EventEmitter();
+	const settled: any[] = [];
+	emitter.on("fetch:book:settled", (event) => settled.push(event));
+	await readyApi().fetchHighlights("co.jp", emitter);
+	expect(settled).toHaveLength(12);
+	expect(settled.filter((e) => e.status === "success")).toHaveLength(11);
+	expect(settled[2]).toMatchObject({
+		status: "failed",
+		bookTitle: "Book 2",
+		error: "Notebook navigation timed out",
+	});
+});
+
+it("leaves failure notices to the synchronization UI", async () => {
+	vi.mocked(Notice).mockClear();
+	const api = new KindleApiService({} as any);
+	await expect(
+		api.fetchHighlights("co.jp", new EventEmitter()),
+	).rejects.toThrow();
+	expect(Notice).not.toHaveBeenCalled();
+});

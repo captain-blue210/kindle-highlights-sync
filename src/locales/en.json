@@ -152,5 +152,76 @@
     "description": "Store session cookies in Obsidian Keychain. Email and password are not stored.",
     "login": "Sign in / verify connection",
     "failed": "Could not connect to Amazon. Notes were not changed."
+  },
+  "progress": {
+    "title": "Kindle sync",
+    "phases": {
+      "auth": "Connecting to Amazon",
+      "fetch": "Fetching books",
+      "metadata": "Preparing metadata",
+      "save": "Saving notes",
+      "session": "Saving Amazon session"
+    },
+    "status": {
+      "completed": "Sync complete",
+      "partial": "Sync complete with issues",
+      "failed": "Sync failed",
+      "interrupted": "Sync interrupted"
+    },
+    "counts": {
+      "total": "Total books",
+      "completed": "Completed",
+      "failed": "Failed",
+      "held": "Needs review"
+    },
+    "currentBook": "Current book: {{title}}",
+    "waiting": "Preparing the next step",
+    "finishedBooks": "Book processing has ended",
+    "unknownTotal": "Determining total books",
+    "barLabel": "Books processed: {{phase}}",
+    "close": "Close",
+    "closeHint": "Sync continues when this window is closed.",
+    "bookPrefix": "Current book: ",
+    "booksCompleted": "books completed",
+    "countSummary": "Completed {{completed}} of {{total}} books",
+    "secondaryCounts": "Failed {{failed}} · Needs review {{held}}",
+    "duration": "Duration {{duration}}",
+    "activity": {
+      "title": "Activity log",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Could not copy the log",
+      "phase": "{{phase}} — {{total}}",
+      "total": "{{total}} books",
+      "bookStart": "{{phase}}: {{title}} — Started",
+      "bookEnd": "{{phase}}: {{title}} — {{outcome}}",
+      "unnamed": "No book selected",
+      "issue": "{{phase}}: {{title}} — {{message}}",
+      "result": "{{status}} — Total {{total}} · Completed {{completed}} · Failed {{failed}} · Needs review {{held}}",
+      "outcomes": {
+        "auth": "Connected",
+        "fetch": "Fetched",
+        "metadata": "Metadata ready",
+        "save": "Saved",
+        "session": "Session saved",
+        "unchanged": "Unchanged",
+        "failed": "Failed",
+        "held": "Needs review"
+      }
+    }
+  },
+  "diagnostics": {
+    "title": "Last error",
+    "empty": "No saved errors.",
+    "details": "Error and review details",
+    "clear": "Clear error record",
+    "counts": "Total {{total}} · Completed {{completed}} · Failed {{failed}} · Needs review {{held}}",
+    "operations": {
+      "sync": "Sync",
+      "login": "Sign in / verify connection",
+      "logout": "Logout"
+    },
+    "saveFailed": "Could not save the error record. It remains available in settings during this session.",
+    "clearFailed": "Could not clear the error record."
   }
 }

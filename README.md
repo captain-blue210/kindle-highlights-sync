@@ -22,3 +22,9 @@ Conversion backs up the original notes under `.obsidian/plugins/kindle-highlight
 Synchronization matches ASIN first, retains stored IDs and filenames, recognizes hadynz `^ref-*` anchors, and appends new highlights after existing content. Ambiguous unanchored highlights are held for review. A successful fetch also updates highlight count and valid annotation date when no new highlights are found. Invalid dates are left untouched instead of replaced with the current time. Failed books are excluded from note updates; partial results are reported.
 
 After conversion these notes are managed by this plugin. To synchronize them with the hadynz plugin again, restore its `kindle-*` property names first. Keep the hadynz plugin disabled while this plugin is active.
+
+## Sync progress and errors
+
+The sync dialog uses a centered animation, current phase and full book title, a slim progress bar, and compact completed/total, failed and review counts. The scrollable activity log records phase and book outcomes with elapsed intervals; its latest 250 entries can be copied. Fetching and saving are reported separately, including notes that need no changes. Closing the dialog allows sync and logging to continue. The bar counts processed books including failures and review holds; reaching 100% with issues is reported as a partial result. Books that need no changes count as completed. Results remain visible until closed.
+
+Settings retain the latest problematic sync, connection or logout operation with safe error details across restarts. Successful operations do not clear it; use the manual clear button in settings. Credentials, cookies and page content are excluded from diagnostics.
