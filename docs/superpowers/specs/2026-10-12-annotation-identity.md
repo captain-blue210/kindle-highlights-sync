@@ -16,7 +16,7 @@ Amazon公開NotebookスクリプトにはDOMの注釈IDとhighlight/note操作�
 
 初回は旧anchor＋位置＋取得元本文の旧hash、または位置＋正規化本文の一意対応で照合する。同hash別本文・同本文別位置を含め、remoteとlegacyの一対一対応を確認する。位置なしhashだけの編集本文、同位置の編集済み未アンカー本文、重複anchorは自動対応しない。保留時はノート全体を変更せず `heldAnnotations: {sourceKey, reason, candidates}[]` を返す。
 
-明示対応は `AnnotationSyncOptions.bindings` またはノートに追記する `<!-- kindle-sync-bind: SOURCE_KEY ^ANCHOR -->`。利用者が対象blockを確認してanchorを指定し、sourceKey・存在する一意anchor・一対一制約を検証した後の再同期で台帳に記録する。旧未アンカーの場合は利用者が自分でblock IDを付けてから明示対応できる。保留中は台帳も本文も書かない。
+明示対応は `AnnotationSyncOptions.bindings`（writerでは保存先パス別の `annotationOptionsByPath`） またはノートに追記する `<!-- kindle-sync-bind: SOURCE_KEY ^ANCHOR -->`。利用者が対象blockを確認してanchorを指定し、sourceKey・存在する一意anchor・一対一制約を検証した後の再同期で台帳に記録する。旧未アンカーの場合は利用者が自分でblock IDを付けてから明示対応できる。保留中は台帳も本文も書かない。まだ保存していない注釈の明示確認は `newSourceKeys` または `<!-- kindle-sync-new: SOURCE_KEY -->`。コード例、行途中のID、閉じていないMarkdown文脈は保存済みtargetとして認識しない。台帳更新は実台帳の元の位置だけを変更する。
 
 ## #34境界
 

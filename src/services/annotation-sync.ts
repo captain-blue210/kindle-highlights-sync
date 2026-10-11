@@ -37,6 +37,7 @@ interface LegacyBlock {
 	text: string;
 	location?: string;
 	anchors: string[];
+	validAnchors: string[];
 	proof: string;
 	unknown: boolean;
 }
@@ -47,32 +48,75 @@ const targetId = (target: Target) =>
 const candidateName = (block: LegacyBlock) =>
 	block.anchors[0] ?? `block:${block.proof}`;
 
-/** Remove fences without modifying the saved note. Comments are handled separately. */
-function outsideFences(body: string): string {
-	let fence: string | undefined;
-	return body
-		.split(/\r?\n/)
-		.map((line) => {
-			const match = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
-			if (match) {
-				if (!fence) fence = match[1];
-				else if (
-					match[1][0] === fence[0] &&
-					match[1].length >= fence.length
-				)
-					fence = undefined;
-				return "";
-			}
-			return fence ? "" : line;
-		})
-		.join("\n");
+const mask = (text: string) => text.replace(/[^\r\n]/g, " ");
+/** Mask code while retaining byte offsets for metadata replacement. Never write this projection. */
+function markdownProjection(body: string): {
+	exposed: string;
+	openContext: boolean;
+} {
+	let fence: { marker: string; depth: number } | undefined;
+	let exposed = body.replace(/[^\n]*(?:\n|$)/g, (line) => {
+		const quotePrefix = /^(?: {0,3}>[ \t]?)+/.exec(line)?.[0] ?? "";
+		const depth = (quotePrefix.match(/>/g) ?? []).length;
+		const content = line.slice(quotePrefix.length).replace(/[\r\n]+$/, "");
+		if (fence && depth < fence.depth) fence = undefined;
+		const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content);
+		if (fence) {
+			if (
+				match &&
+				depth === fence.depth &&
+				match[1][0] === fence.marker[0] &&
+				match[1].length >= fence.marker.length &&
+				!match[2].trim()
+			)
+				fence = undefined;
+			return mask(line);
+		}
+		if (match && !(match[1][0] === "`" && match[2].includes("`"))) {
+			fence = { marker: match[1], depth };
+			return mask(line);
+		}
+		return /^(?: {4}|\t)/.test(content) ? mask(line) : line;
+	});
+	// CommonMark code spans close with the same length backtick run, including across lines.
+	const runs = [...exposed.matchAll(/`+/g)];
+	for (let i = 0; i < runs.length; i++) {
+		const opening = runs[i];
+		const escaped =
+			/\\+$/.exec(exposed.slice(0, opening.index))?.[0].length ?? 0;
+		if (escaped % 2) continue;
+		const close = runs.findIndex(
+			(r, index) => index > i && r[0].length === opening[0].length,
+		);
+		if (close < 0) continue;
+		const start = opening.index!;
+		const end = runs[close].index! + runs[close][0].length;
+		exposed =
+			exposed.slice(0, start) +
+			mask(exposed.slice(start, end)) +
+			exposed.slice(end);
+		i = close;
+	}
+	const comments = [...exposed.matchAll(/<!--[\s\S]*?(?:-->|$)/g)];
+	return {
+		exposed,
+		openContext: !!fence || comments.some((m) => !m[0].endsWith("-->")),
+	};
 }
+const outsideFences = (body: string) => markdownProjection(body).exposed;
+const visibleMarkdown = (body: string) =>
+	outsideFences(body)
+		.replace(/<!--[\s\S]*?(?:-->|$)/g, mask)
+		.replace(/\r\n/g, "\n");
 function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 	const blocks: LegacyBlock[] = [];
 	const add = (block: string, quote: boolean) => {
 		const anchors = [...block.matchAll(/\^([A-Za-z0-9-]+)(?=\s|$)/g)].map(
 			(m) => m[1],
 		);
+		const validAnchors = [
+			...block.matchAll(/(?:^|[ \t])\^([A-Za-z0-9-]+)(?=[ \t]*$)/gm),
+		].map((m) => m[1]);
 		const link = /kindle:\/\/book\?[^\s)]+/.exec(block);
 		let location: string | undefined;
 		if (link) {
@@ -106,8 +150,13 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 			text,
 			location,
 			anchors,
-			proof: digest(block),
-			unknown: quote && !location && !anchors.length,
+			validAnchors,
+			// Appending our own metadata changes paragraph separators, not the legacy block.
+			proof: digest(block.trim()),
+			unknown:
+				quote &&
+				!location &&
+				!anchors.some((a) => /^(?:ref-\d+|ks-[a-f0-9]{64})$/.test(a)),
 		});
 	};
 	const quotePattern = /^>.*(?:\n^>.*)*/gm;
@@ -125,17 +174,18 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 function parseLedger(
 	body: string,
 	asin: string,
-): { ledger: Ledger; raw?: string } {
-	const matches = [
-		...outsideFences(body).matchAll(/<!-- kindle-sync:v1 ([^\n]*?) -->/g),
+): { ledger: Ledger; marker?: { offset: number; length: number } } {
+	const comments = [
+		...outsideFences(body).matchAll(/<!--[\s\S]*?(?:-->|$)/g),
 	];
-	if (!matches.length) {
-		if (/<!--\s*kindle-sync:/.test(outsideFences(body)))
-			throw Error("Invalid ledger marker");
+	const markers = comments.filter((m) => /^<!--\s*kindle-sync:/.test(m[0]));
+	if (!markers.length) {
 		return { ledger: { version: 1, asin, entries: {} } };
 	}
-	if (matches.length !== 1) throw Error("Multiple ledgers");
-	const payload = matches[0][1];
+	if (markers.length !== 1) throw Error("Multiple ledgers");
+	const match = /^<!-- kindle-sync:v1 ([^\r\n]*?) -->$/.exec(markers[0][0]);
+	if (!match) throw Error("Invalid ledger marker");
+	const payload = match[1];
 	if (!/^[A-Za-z0-9+/]+={0,2}$/.test(payload))
 		throw Error("Invalid ledger encoding");
 	const data = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
@@ -168,7 +218,10 @@ function parseLedger(
 			throw Error("Non-unique correspondence");
 		seen.add(targetId(target));
 	}
-	return { ledger: data, raw: matches[0][0] };
+	return {
+		ledger: data,
+		marker: { offset: markers[0].index!, length: markers[0][0].length },
+	};
 }
 function append(body: string, suffix: string): string {
 	const nl = body.includes("\r\n") ? "\r\n" : "\n";
@@ -211,9 +264,18 @@ export function reconcileAnnotations(
 			heldAnnotations,
 		};
 	}
-	const { ledger, raw } = state;
+	const { ledger, marker } = state;
 	const exposed = outsideFences(body);
-	const visible = exposed.replace(/<!--[\s\S]*?-->/g, "");
+	const visible = visibleMarkdown(body);
+	if (markdownProjection(body).openContext) {
+		hold("", "invalid-ledger");
+		return {
+			body,
+			added: 0,
+			warnings: ["Unclosed Markdown context; note left unchanged"],
+			heldAnnotations,
+		};
+	}
 	const blocks = scanBlocks(visible, asin);
 	const anchorCounts = new Map<string, number>();
 	for (const block of blocks)
@@ -222,7 +284,7 @@ export function reconcileAnnotations(
 	const targetBlocks = (target: Target) =>
 		blocks.filter((b) =>
 			"anchor" in target
-				? b.anchors.includes(target.anchor)
+				? b.validAnchors.includes(target.anchor)
 				: b.proof === target.proof,
 		);
 	const used = new Set<LegacyBlock>();
@@ -297,7 +359,9 @@ export function reconcileAnnotations(
 		const hash = "ref-" + kindleHash(h.text ?? "");
 		const newAnchor = annotationAnchor(h, asin);
 		const text = normalizeSourceText(annotationText(h));
-		const exactAnchor = blocks.filter((b) => b.anchors.includes(newAnchor));
+		const exactAnchor = blocks.filter((b) =>
+			b.validAnchors.includes(newAnchor),
+		);
 		if (exactAnchor.length) {
 			if (
 				exactAnchor.length !== 1 ||
@@ -374,7 +438,42 @@ export function reconcileAnnotations(
 		return { body, added: 0, warnings: [], heldAnnotations };
 	const encoded = `<!-- kindle-sync:v1 ${Buffer.from(JSON.stringify(ledger), "utf8").toString("base64")} -->`;
 	// Modify only our own metadata, never the existing annotation blocks.
-	merged = raw ? merged.replace(raw, encoded) : append(merged, encoded);
+	merged = marker
+		? merged.slice(0, marker.offset) +
+			encoded +
+			merged.slice(marker.offset + marker.length)
+		: append(merged, encoded);
+	// Even source text can contain Markdown that hides the newly rendered IDs. Confirm the final note.
+	const finalBlocks = scanBlocks(visibleMarkdown(merged), asin);
+	for (const [key, target] of Object.entries(ledger.entries)) {
+		const matches = finalBlocks.filter((b) =>
+			"anchor" in target
+				? b.validAnchors.includes(target.anchor)
+				: b.proof === target.proof,
+		);
+		if (
+			matches.length !== 1 ||
+			("anchor" in target &&
+				finalBlocks
+					.flatMap((b) => b.anchors)
+					.filter((a) => a === target.anchor).length !== 1)
+		)
+			hold(key, "missing-target");
+	}
+	try {
+		parseLedger(merged, asin);
+	} catch {
+		hold("", "invalid-ledger");
+	}
+	if (markdownProjection(merged).openContext || heldAnnotations.length)
+		return {
+			body,
+			added: 0,
+			warnings: [
+				"Rendered annotation targets are not visible; note left unchanged",
+			],
+			heldAnnotations,
+		};
 	return {
 		body: merged,
 		added: missing.length,
@@ -390,13 +489,13 @@ export function prepareNewNoteAnnotations(
 	asin: string,
 ) {
 	const remote = uniqueAnnotations(highlights, asin);
-	const visible = outsideFences(body).replace(/<!--[\s\S]*?-->/g, "");
+	const visible = visibleMarkdown(body);
 	const blocks = scanBlocks(visible, asin);
 	const heldAnnotations: HeldAnnotation[] = [];
 	for (const h of remote) {
 		const anchor = annotationAnchor(h, asin);
 		if (
-			blocks.flatMap((b) => b.anchors).filter((a) => a === anchor)
+			blocks.flatMap((b) => b.validAnchors).filter((a) => a === anchor)
 				.length !== 1
 		)
 			heldAnnotations.push({

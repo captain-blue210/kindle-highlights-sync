@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { mergeHighlights, kindleHash } from "./note-sync";
+import { mergeHighlights, kindleHash, renderHighlight } from "./note-sync";
+import { annotationKey } from "./annotation-identity";
+import { prepareNewNoteAnnotations } from "./annotation-sync";
 import type { Highlight } from "../models";
 
 const h = (text: string, location = "10", note?: string): Highlight => ({
@@ -11,6 +13,71 @@ const h = (text: string, location = "10", note?: string): Highlight => ({
 });
 
 describe("source annotations independent of edited note text", () => {
+	it.each([
+		"quote-fence",
+		"indent",
+		"inline",
+		"invalid-close",
+		"middle-of-line",
+	])(
+		"does not accept IDs in %s code examples as template targets",
+		(context) => {
+			const rendered = renderHighlight(h("abc"), "ABC");
+			const anchor = rendered.match(/\^ks-[a-f0-9]{64}/)![0];
+			const body =
+				context === "quote-fence"
+					? `> \`\`\`md\n> abc ${anchor}\n> \`\`\`\n`
+					: context === "indent"
+						? `    abc ${anchor}\n`
+						: context === "inline"
+							? `\`abc ${anchor} \`\n`
+							: context === "middle-of-line"
+								? `abc ${anchor} is only a sample ID\n`
+								: `\`\`\`md\nexample\n\`\`\`not-a-closing-fence\n${rendered}\n`;
+			const result = prepareNewNoteAnnotations(body, [h("abc")], "ABC");
+			expect(result.body).toBe(body);
+			expect(result.warnings.length).toBeGreaterThan(0);
+		},
+	);
+	it.each(["Memo\n```text\nunfinished\n", "Memo\n<!-- unfinished\n"])(
+		"holds an open Markdown context on every retry",
+		(body) => {
+			const first = mergeHighlights(body, [h("abc")], "ABC");
+			expect(first.body).toBe(body);
+			expect(first.added).toBe(0);
+			expect(first.warnings.length).toBeGreaterThan(0);
+			const second = mergeHighlights(first.body, [h("abc")], "ABC");
+			expect(second.body).toBe(body);
+			expect(second.added).toBe(0);
+		},
+	);
+	it("updates the active ledger while keeping a preceding fenced ledger sample byte-for-byte", () => {
+		const first = mergeHighlights("", [h("abc")], "ABC");
+		const ledger = first.body.match(/<!-- kindle-sync:v1 .*? -->/)![0];
+		const example = `My documentation\n\`\`\`md\n${ledger}\n\`\`\`\n\n`;
+		const result = mergeHighlights(
+			example + first.body,
+			[h("abc"), h("new", "20")],
+			"ABC",
+		);
+		expect(result.warnings).toEqual([]);
+		expect(result.added).toBe(1);
+		expect(result.body.startsWith(example)).toBe(true);
+		expect(
+			mergeHighlights(result.body, [h("abc"), h("new", "20")], "ABC")
+				.body,
+		).toBe(result.body);
+	});
+	it.each([
+		"<!-- kindle-sync:v2 garbage -->",
+		"<!-- kindle-sync:v1 not-valid",
+	])("holds mixed valid and unsupported ledger state: %s", (invalid) => {
+		const first = mergeHighlights("", [h("abc")], "ABC");
+		const body = first.body + invalid + "\n";
+		const result = mergeHighlights(body, [h("abc")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.heldAnnotations[0].reason).toBe("invalid-ledger");
+	});
 	it("keeps identical text at two locations and deduplicates page overlap", () => {
 		const first = mergeHighlights(
 			"",
@@ -74,7 +141,7 @@ describe("source annotations independent of edited note text", () => {
 				{ reason: "ambiguous-legacy", candidates: ["ref-19495"] },
 			],
 		});
-		const key = (result as any).heldAnnotations[0].sourceKey;
+		const key = result.heldAnnotations[0].sourceKey;
 		const bound = body + `\n<!-- kindle-sync-bind: ${key} ^ref-19495 -->\n`;
 		const resolved = mergeHighlights(bound, [h("abc")], "ABC");
 		expect(resolved.warnings).toEqual([]);
@@ -216,11 +283,22 @@ describe("source annotations independent of edited note text", () => {
 	it("does not accept two source bindings to the same old block", () => {
 		const body = "> edited ^old-id\n";
 		const held = mergeHighlights(body, [h("abc"), h("abc", "20")], "ABC", {
-			bindings: { "bad-key": "old-id" },
+			bindings: {
+				[annotationKey(h("abc"), "ABC")]: "old-id",
+				[annotationKey(h("abc", "20"), "ABC")]: "old-id",
+			},
 		});
 		expect(held.body).toBe(body);
 		expect(
 			held.heldAnnotations.some((a) => a.reason === "invalid-binding"),
 		).toBe(true);
+	});
+	it("holds an edited custom-anchored legacy quote with no location", () => {
+		const body = "> Edited abc ^my-old-block\n\n[[Book#^my-old-block]]\n";
+		const result = mergeHighlights(body, [h("abc")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.heldAnnotations).toMatchObject([
+			{ reason: "ambiguous-legacy", candidates: ["my-old-block"] },
+		]);
 	});
 });

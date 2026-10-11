@@ -169,6 +169,8 @@ export async function saveBookNotes(
 					);
 					if (
 						!properties ||
+						(selectedPath !== undefined &&
+							properties.asin !== book.asin) ||
 						(properties.asin && properties.asin !== book.asin)
 					)
 						throw new Error(

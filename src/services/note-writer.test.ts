@@ -253,6 +253,29 @@ it("reports an identical existing note as unchanged while retaining its successf
 });
 
 describe("atomic annotation ledger and selected destination", () => {
+	it("does not write a selected note whose ASIN was removed after its initial scan", async () => {
+		const io = memoryVault({
+			"books/Chosen.md":
+				"---\nbookId: saved\ntitle: Old\nASIN: ABC\n---\nOld memo\n",
+		});
+		const replacement =
+			"---\nbookId: unrelated\ntitle: Different\n---\nUnrelated note\n";
+		io.process = async (path, fn) => {
+			io.files.set(path, replacement);
+			io.files.set(path, fn(replacement));
+		};
+		const result = await saveBookNotes(
+			io,
+			config,
+			[book],
+			[highlight],
+			undefined,
+			undefined,
+			{ targetPaths: { ABC: "books/Chosen.md" } },
+		);
+		expect(result.failed).toBe(1);
+		expect(io.files.get("books/Chosen.md")).toBe(replacement);
+	});
 	it("creates all unique annotations and maintains edited text on repeated saves and new additions", async () => {
 		const io = memoryVault();
 		const remote = [
