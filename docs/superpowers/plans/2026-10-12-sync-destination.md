@@ -28,4 +28,6 @@ Consumes: resolver types and scan; produces persisted noteDestinations.
 ### Task 3: Verification and PR
 - [x] Run full npm test, npx tsc --noEmit --skipLibCheck, npm run build and git diff --check.
 - [x] Review whole diff and requirement matrix; fix meaningful findings with regression tests.
-- [ ] Commit, push feature branch, create and attach PR with interface, storage, held-outcome formats and #33 integration limitation. Do not merge.
+- [x] Commit, push feature branch, create and attach PR with interface, storage, held-outcome formats and #33 integration limitation. Do not merge.
+
+Delivered: draft PR https://github.com/captain-blue210/kindle-highlights-sync/pull/38; worktree retained for #33 integration.

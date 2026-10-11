@@ -43,3 +43,5 @@ Persisted identity also includes device/inode/birthtimeNs. Real temporary-filesy
 Merge only after combining with #33 and checking separate positions for identical text, old hash collisions/anchors, note-only annotations, switching chosen destination with existing correspondence, repeated sync and resume after hold. This PR does not merge or cherry-pick #33.
 
 Final safety refinement: persisted `fileId` now prevents equal-ctime offline replacement. Resolver regression was RED→GREEN; native IO tests use actual temporary filesystem notes, verify distinct file IDs after replacement, exact unselected file bytes, and identity/content preservation over two consecutive syncs. Legacy selections without this field are invalidated on load. No new dependency or note marker was added.
+
+Delivered as draft PR #38: https://github.com/captain-blue210/kindle-highlights-sync/pull/38. PR is open against main; no merge performed. GitHub reported no status checks; verification above is local.
