@@ -17,7 +17,7 @@ Base: origin/main c08c758. Feature: codex/issue-34-sync-destination.
 | Two consecutive syncs and resume after hold | writer adds once, second adds zero, complete content equality; hold then select and rerun |
 | Failed settings save cannot enable selection | main rollback test and queue-race regression with another ASIN invalidation; successful selections retained by queued settings saves; pending rename persisted |
 | Return held reasons to diagnostics/result | NoteSaveOutcome reason/candidates; writer completion callbacks; main partial progress counts and diagnostic noteSave assertions |
-| Separation from #33 | note-destination returns snapshots; writer keeps syncNoteContent/renderHighlight unchanged; note-sync changes only optional snapshot ctime |
+| Separation from #33 | note-destination returns snapshots; writer keeps syncNoteContent/renderHighlight unchanged; note-sync changes only optional snapshot ctime/fileId |
 
 ## Independent review
 
@@ -32,7 +32,7 @@ Additional scan-disappearance regression was RED→GREEN. Full suite/typecheck/b
 
 `resolveNoteDestination` returns existing note snapshot (path/content/optional ctime/fileId), new, or held (stable reason, candidates, optional selectedPath). Existing notes go through atomic io.process; its current content is passed to syncNoteContent. Plug annotation correspondence lookup/append into that call without reintroducing independent destination lookup. Validate correspondence against the selected destination when switching to another candidate.
 
-Plugin data.json stores noteDestinations[asin] = {path, ctime, fileId, invalidated?}. NoteWriterIO.identity returns creation time; createVaultIO pins file objects. Writer invalidation updates this table; main persists changes before treating sync as finished. Held outcomes include asin/status=held/reason/candidates and optional path; completion callbacks remain held. Annotation IDs, old anchor matching and new-annotation rendering are #33's responsibility.
+Plugin data.json stores noteDestinations[asin] = {path, ctime, fileId, invalidated?}. NoteWriterIO.identity returns creation time and fileIdentity returns device/inode/birthtimeNs; createVaultIO pins file objects. Writer invalidation updates this table; main persists changes before treating sync as finished. Held outcomes include asin/status=held/reason/candidates and optional path; completion callbacks remain held. Annotation IDs, old anchor matching and new-annotation rendering are #33's responsibility.
 
 ## Unverified and merge gates
 
