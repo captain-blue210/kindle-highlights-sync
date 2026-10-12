@@ -235,7 +235,15 @@ describe("Issue #33 annotation ledger through Issue #34 persisted destination", 
 	it("does not let transient target paths bypass a persisted invalidated destination", async () => {
 		const v = filesystemVault();
 		const selected = v.select(v.a);
-		const settings = {...selected, noteDestinations: {ABC: {...selected.noteDestinations.ABC, invalidated: "deleted" as const}}};
+		const settings = {
+			...selected,
+			noteDestinations: {
+				ABC: {
+					...selected.noteDestinations.ABC,
+					invalidated: "deleted" as const,
+				},
+			},
+		};
 		const result = await saveBookNotes(
 			createVaultIO(v.app),
 			settings,
@@ -248,5 +256,35 @@ describe("Issue #33 annotation ledger through Issue #34 persisted destination", 
 		expect(result.held).toBe(1);
 		expect(v.read(v.a)).toBe(v.sourceA);
 		expect(v.read(v.b)).toBe(v.sourceB);
+	});
+	it("does not invalidate a valid persisted selection when the caller supplies a conflicting transient path", async () => {
+		const v = filesystemVault();
+		const settings = v.select(v.a);
+		const originalSelection = JSON.parse(
+			JSON.stringify(settings.noteDestinations),
+		);
+		const held = await saveBookNotes(
+			createVaultIO(v.app),
+			settings,
+			[book],
+			remote,
+			undefined,
+			undefined,
+			{ targetPaths: { ABC: v.b } },
+		);
+		expect(held.held).toBe(1);
+		expect(settings.noteDestinations).toEqual(originalSelection);
+		expect(v.read(v.a)).toBe(v.sourceA);
+		expect(v.read(v.b)).toBe(v.sourceB);
+		expect(
+			(
+				await saveBookNotes(
+					createVaultIO(v.app),
+					settings,
+					[book],
+					remote,
+				)
+			).added,
+		).toBe(5);
 	});
 });

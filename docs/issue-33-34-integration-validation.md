@@ -22,7 +22,7 @@
 | B | 19 | 他書籍へ切替後に再選択 | すべて一致 |
 | C | 656 | 他書籍へ切替後に再選択 | すべて一致 |
 
-計677件で短時間の再取得に対する安定性を確認した。annotation行IDと子highlight IDが存在する。子highlight IDは `highlight-<annotation行ID>` の形だった。ID自体にはアカウント識別情報を含むため、公表資料には実IDを記載しない。
+計677件で短時間の再取得に対する安定性を確認した。annotation行IDと子highlight IDが存在する。子highlight IDは `highlight-<annotation行ID>` の形だった。利用者の注釈識別子として扱い、公表資料には実IDを記載しない。
 
 これは長期間、Kindle側の編集・削除再作成、端末・アカウント・リージョン間の保証ではない。主キーは引き続きASIN・位置・種別・取得元本文のSHA-256を使う。サンプル3冊はすべてメモ0件で、note-onlyの実DOM ID安定性は未確認。#31の同一行内メモ／独立メモ抽出は未実装の別issueとして残る。
 
@@ -42,7 +42,7 @@
 
 ## 自動検証
 
-- `npm test`: 20ファイル、252テスト通過。#33・#34両suiteと、実一時ファイルを使う両issueの組合せテストを含む。
+- `npm test`: 20ファイル、253テスト通過。#33・#34両suiteと、実一時ファイルを使う両issueの組合せテストを含む。
 - `npx tsc --noEmit --skipLibCheck`: 成功。
 - `npm run build`: 成功。
 - `git diff --check`: 成功。
@@ -54,3 +54,11 @@
 実ObsidianでのModal表示、設定の永続化、Vaultイベント順序、block参照の描画・移動、実ランタイム上の同期は未確認。installer更新について利用者に確認を依頼済み。承認されるまでインストーラーの置換・アプリ終了・実Vaultへの配布は行わない。実画面確認も複製Vaultで行う。
 
 PR #37/#38はいずれもdraftのまま。mainへのmergeは行っていない。
+
+## 統合コードの独立レビューと追補
+
+独立レビューは8d55663の競合解消・接続部分を確認し、Critical/Important指摘なし。reader実行で関連43テストが通過した。Minorは「一時targetPathsと無効化済み永続指定が同じパスの場合の追加回帰テストが未追加」の1件。現在の処理は正しいとコード確認されたため、追加回帰テストは後続へ保留した。
+
+別のauthor確認では、不一致の一時targetPathsを渡すだけで正常な永続指定までidentity-changedにする問題を見つけた。再現テストをRED→GREENにし、不一致はdestination-invalidで保留しつつ正常な指定を維持するよう修正。全253テスト、型チェック、buildを再実行した。
+
+独立レビューは両親PRの実装全体、実Obsidianランタイム、privateなNotebook観測／ノートhashの再現、installer更新・配布・main mergeを対象外とした。前二者は既存PRの検証と上記の追加検証で補い、実ランタイムの不足は残る制約として維持する。private検証についてはauthorが実データで実行し原本241件のhash不変を確認した。

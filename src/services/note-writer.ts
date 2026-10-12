@@ -169,7 +169,8 @@ export async function saveBookNotes(
 				persisted.path !== selectedPath
 			)
 				throw new DestinationHeld({
-					reason: "destination-identity-changed",
+					reason: "destination-invalid",
+					invalidateSelection: false,
 					candidates: notes
 						.filter(
 							(n) =>
@@ -448,6 +449,7 @@ export async function saveBookNotes(
 				if (
 					selected &&
 					selectedPath === selected.path &&
+					error.resolution.invalidateSelection !== false &&
 					!selected.invalidated
 				) {
 					selected.invalidated = reason.replace(
@@ -523,6 +525,8 @@ class DestinationHeld extends Error {
 			reason: DestinationHoldReason;
 			candidates: string[];
 			selectedPath?: string;
+			/** Caller disagreement is not evidence that the persisted file changed. */
+			invalidateSelection?: boolean;
 		},
 	) {
 		super(resolution.reason);
