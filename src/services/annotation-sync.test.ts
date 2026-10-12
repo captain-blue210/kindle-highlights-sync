@@ -24,6 +24,7 @@ describe("legacy plain Markdown comparison", () => {
 			{ text: "prefix: power-driven", separator: "–", label: "location" },
 			{ text: "--\npower-driven", separator: "—", label: "location" },
 			{ text: "power-driven", separator: "—", label: "location", gap: "" },
+			{ text: "power-driven", separator: "-", label: "location", gap: "" },
 			{ text: "alpha—aside", separator: "–", label: "location", gap: "" },
 		];
 		for (const {text, separator, label, gap = " "} of cases) {

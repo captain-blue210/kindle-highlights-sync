@@ -143,7 +143,7 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 						.slice(0, link.index)
 						.replace(
 							// A later caption separator belongs to the suffix, not source text.
-							/[ \t]*(?:[—–-][ \t]*(?:(?![—–]|[ \t]+-)[^:\r\n])+:[ \t]*)?\[[^\]\r\n]*\]\($/,
+							/[ \t]*(?:[—–-][ \t]*(?:(?![—–]|[ \t]+-|-[ \t])[^:\r\n])+:[ \t]*)?\[[^\]\r\n]*\]\($/,
 							"",
 						)
 				: block;
