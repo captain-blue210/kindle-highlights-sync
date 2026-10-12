@@ -98,7 +98,7 @@ saveBookNotes(io, settings, books, highlights, onBook, onBookSettled, {
 - 回帰テスト: 同本文・同位置の重複、同本文・別位置、実際のFletcher16衝突 `aca` / `bab`（ともに19494）、複数note-only、編集された本文と内部リンク、旧／custom block ID、ファイル改名、CRLF。
 - 連続2回同期、新規追加、曖昧保留→bind/new→再同期、未アンカー移行後の編集→再対応付け、create/processの保存前／保存後例外→再実行を検証。
 - 選択先だけ更新、別同ASINノートの全文・プロパティ保持、選択先消失／ASIN相違、台帳破損／消失／target消失、カスタムテンプレート省略／重複を検証。
-- 実ノートの変更・実アカウントの注釈変更・プラグインの実vault配布は行っていない。Amazon IDの時系列安定性、#31抽出改善、#34のUI・設定との統合は未確認。
+- 実ノートの変更・実アカウントの注釈変更・プラグインの実vault配布は行っていない。Amazon IDの長期安定性と#31抽出改善は未確認。#34統合の後続検証は下記を参照。
 - PRは#34との統合検証までmergeしない。
 
 ## 最終確認（2026-10-12）
@@ -109,3 +109,11 @@ saveBookNotes(io, settings, books, highlights, onBook, onBookSettled, {
 - `git diff --check`: exit 0。
 - 独立レビューのImportant 5件を再現テストでRED→GREENにした。コード例中のID、未閉鎖のフェンス／HTMLコメント、実台帳の前の台帳サンプル、指定先の保存直前ASIN削除、未知／不正台帳の混在を修正。Critical指摘・未修正Minor指摘はなし。
 - ノート内台帳を採用した設計判断と、保存先パス別の手動対応オプションはspec/planに記録。前者の利用上の差はノートのバックアップ／exportにプラグイン用コメントが含まれること。
+
+## 未確認事項の追補（2026-10-12）
+
+日本のNotebookで3冊677件のIDを再取得比較し、すべて一致した。長期・編集後・note-only IDの保証は引き続き未確認。主キーの方式は変更していない。
+
+#34との統合候補は `codex/verify-issues-33-34`（最終コード32b1f75）。初回254テスト、最終257テスト・型チェック・buildを確認し、実ノート241件の複製で選択先隔離・連続同期・新規追加・保存後例外回復と実Fletcher16衝突の保留解除を検証した。原本は全件hash不変。
+
+詳しい結果と残る実Obsidian制約は [issue-33-34-integration-validation.md](issue-33-34-integration-validation.md) を参照。installerを1.14.4へ更新し、複製VaultでModal・設定保存／再読込・実同期・block参照描画／改名追従・改名／削除後保留・再指定回復を確認した。新規block IDの生成位置と既存proof台帳の互換性をRED→GREENで修正。PR #37の最終検証は204テスト・型チェック・build成功。両PRとmainは未マージ。
