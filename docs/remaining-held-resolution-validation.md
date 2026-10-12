@@ -14,7 +14,7 @@ The approved 55 cases have unique kind/text/location correspondence, unique raw 
 
 Safe clone verification preserves all 242 original bodies, 2,777 old `ref-*` anchors, 42 internal links and 1,917 nonempty properties outside sync-controlled fields. No notes or source annotations are added, no writes fail and no duplicate anchors/ledger keys/targets are introduced. The repeat clone is byte-identical across all 242 files.
 
-## Bundled confirmation proposals
+## Bundled confirmation proposals before approval
 
 Private context records cover 18 duplicate exact highlights, five edited wiki-link displays and 22 unmarked memos. Duplicate exact highlights propose the first original-order block while retaining both copies. All memo recommendations match the preceding source position and, for attached memos, the parent highlight text or legacy hash.
 
@@ -22,7 +22,7 @@ The proposed routes are 23 existing unique anchors, 14 existing unique proofs an
 
 The 45 proposals require matched human confirmation before live application. Generated packets carry source, proposal and content hashes; confirmation must bind the exact ready-packet bytes. Completed safe receipts bind the safe packet and path set, permitting a later confirmed rollout without replaying an already-applied note. Unrecognized drift fails preflight or the atomic callback.
 
-## Actual Obsidian rollout
+## Initial safe-only Obsidian rollout
 
 The safe-only packet was applied with original-content checks before and inside `vault.process`. All 242 original bodies, 2,777 old references and 42 internal links remain intact. All 2,725 previously cached Obsidian block IDs remain recognized. No unconfirmed proposal or helper ID has been applied.
 
@@ -30,6 +30,16 @@ Actual full sync listed and fetched all 257 books, with zero fetch/write failure
 
 All 242 original bodies, old references, links and nonempty properties outside sync-controlled fields were preserved; one file received the expected ledger addition and timestamp update. Normal sync after plugin reload listed all 257 books, fetched 54 and skipped 203. There were zero fetch/write failures, created notes or appended source annotations, and the same 26 correspondence holds / 45 source keys remained. All 242 files were byte-identical to the full-sync snapshot. Checkpoints are 208 complete/complete, 26 complete/held and 23 complete/pending. The refreshed four destination records remained unchanged, and all 2,725 previously cached IDs remain recognized.
 
-The final live hold keys exactly match the private confirmation list. Its 45 proposals and eight helper IDs remain unapplied. The normal session's `partial` status reflects those review holds. The deployed `main.js` SHA-256 is `c41010f8dbbdd0fd1efb0f87c1b0038dbcfd3ab0d597220a418c61bf37e003b7`.
+At the safe-only stage, the live hold keys exactly matched the private confirmation list. Its 45 proposals and eight helper IDs were still unapplied. The normal session's `partial` status reflects those review holds. The deployed `main.js` SHA-256 is `c41010f8dbbdd0fd1efb0f87c1b0038dbcfd3ab0d597220a418c61bf37e003b7`.
 
 Private source excerpts, library titles, exact correspondence records and backups stay outside Git. This document contains aggregate evidence only.
+
+## Confirmed Obsidian rollout
+
+The user subsequently approved all 45 recommended correspondences, including the eight helper IDs. The approval record binds the source, immutable proposal list and exact generated packet by SHA-256. A fresh backup of all 242 notes, plugin files and settings was verified before application. The 26 destination notes matched the reviewed original hashes; the already-applied safe note was excluded through its completed receipt. All 26 whole-note packets were applied through the atomic content checks.
+
+The 45 approved ledger targets match the recommendations. Only the eight approved helper-ID lines were introduced into existing memo paragraphs; a separate comparison copy removes exactly those lines and confirms preservation of all 242 original bodies, 2,777 old references, 42 internal links and 1,917 nonempty properties outside controlled sync fields. Neither the live notes nor the original snapshots are modified for that comparison. No new repeated IDs, ledger keys or ledger targets were introduced.
+
+Actual full sync fetched all 257 books and completed with zero held books, fetch/write failures, created notes or appended source annotations. All 242 files were byte-identical to the post-application snapshot. Plugin reload retained the four selected destinations. Subsequent normal sync fetched 24 books and skipped 233, again completing with zero held books, failures, created notes or appended source annotations. All 242 files remained byte-identical to the full-sync snapshot.
+
+All 2,725 previously cached block IDs remain recognized, and all eight approved helper IDs are recognized. Checkpoints are 234 complete/complete and 23 complete/pending; the latter are books with no highlights, reported as skipped-no-highlights rather than holds. The deployed software artifacts are unchanged from the verified build above. The confirmation list now has no pending decisions. Approval receipts, fresh backups and before/after evidence remain private and outside Git.
