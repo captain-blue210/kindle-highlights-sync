@@ -12,6 +12,120 @@ const h = (text: string, location = "10", note?: string): Highlight => ({
 	note,
 });
 
+describe("legacy plain Markdown comparison", () => {
+	it.each(["\n", "\r\n"])("reads text after a separator without changing %j bytes", (newline) => {
+		const body = [
+			"alpha — location: [10](kindle://book?action=open&asin=ABC&location=10) ^old-alpha",
+			"", "---",
+			"beta — location: [20](kindle://book?action=open&asin=ABC&location=20) ^old-beta",
+			"",
+		].join(newline);
+		const remote = [h("alpha"), h("beta", "20")];
+		const first = mergeHighlights(body, remote, "ABC");
+		expect(first.warnings).toEqual([]);
+		expect(first.added).toBe(0);
+		expect(first.body.startsWith(body)).toBe(true);
+		const payload = first.body.match(/<!-- kindle-sync:v1 (\S+) -->/)![1];
+		expect(Object.values(JSON.parse(Buffer.from(payload, "base64").toString()).entries))
+			.toEqual([{ anchor: "old-alpha" }, { anchor: "old-beta" }]);
+		expect(mergeHighlights(first.body, remote, "ABC").body).toBe(first.body);
+	});
+	it("does not consume a literal dash line as a multiline location label", () => {
+		const body = "--\nbeta — location: [20](kindle://book?action=open&asin=ABC&location=20) ^old-beta\n";
+		const result = mergeHighlights(body, [h("--\nbeta", "20")], "ABC");
+		expect(result.warnings).toEqual([]);
+		expect(result.added).toBe(0);
+		expect(result.body.startsWith(body)).toBe(true);
+	});
+	it("keeps a previously saved separator-prefixed plain proof ledger", () => {
+		const body = "---\nbeta — location: [20](kindle://book?action=open&asin=ABC&location=20)\n\n" +
+			"<!-- kindle-sync:v1 eyJ2ZXJzaW9uIjoxLCJhc2luIjoiQUJDIiwiZW50cmllcyI6eyJzMS03NmY0ZjdhNDk3Y2JhMGViN2Y4NzFhNzBjZjFhYjA0ZWQxNmI4NTNmYTNlYzkzYjI2N2EwYmViNmE2ZDU3MTc5Ijp7InByb29mIjoiYjU5MzQwNmJmZjA3OTVkNjExZmUyNmQ5Mjg4MDE4ZWExN2Q5YjhiZDUwMzQwMjA5MzRkNTk3ZDBiYTBkM2I3YSJ9fX0= -->\n";
+		const repeated = mergeHighlights(body, [h("beta", "20")], "ABC");
+		expect(repeated.warnings).toEqual([]);
+		expect(repeated.body).toBe(body);
+		const added = mergeHighlights(body, [h("beta", "20"), h("gamma", "30")], "ABC");
+		expect(added.warnings).toEqual([]);
+		expect(added.added).toBe(1);
+		expect(added.body.startsWith(body.split("<!-- kindle-sync:v1")[0])).toBe(true);
+	});
+});
+
+describe("unique exact legacy correspondence", () => {
+	it.each(["plain", "quote"])("matches distinct %s texts sharing one location", (style) => {
+		const body = style === "plain"
+			? "alpha — location: [10](kindle://book?action=open&asin=ABC&location=10) ^old-alpha\n\n---\nbeta — location: [10](kindle://book?action=open&asin=ABC&location=10) ^old-beta\n"
+			: "> alpha ^old-alpha\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n> beta ^old-beta\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const remote = [h("alpha"), h("beta")];
+		const first = mergeHighlights(body, remote, "ABC");
+		expect(first.warnings).toEqual([]);
+		expect(first.added).toBe(0);
+		expect(first.body.startsWith(body)).toBe(true);
+		const payload = first.body.match(/<!-- kindle-sync:v1 (\S+) -->/)![1];
+		expect(Object.values(JSON.parse(Buffer.from(payload, "base64").toString()).entries))
+			.toEqual([{ anchor: "old-alpha" }, { anchor: "old-beta" }]);
+		expect(mergeHighlights(first.body, remote, "ABC").body).toBe(first.body);
+	});
+	it("holds duplicate exact blocks instead of choosing the first", () => {
+		const body = "> alpha ^old-first\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n> alpha ^old-second\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const result = mergeHighlights(body, [h("alpha")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.added).toBe(0);
+		expect(result.heldAnnotations[0].reason).toBe("ambiguous-legacy");
+	});
+	it("counts an occupied exact block when deciding whether correspondence is unique", () => {
+		const first = mergeHighlights("> gamma ^old-used\n> [10](kindle://book?action=open&asin=ABC&location=10)\n", [h("gamma")], "ABC");
+		const body = first.body.replace("> gamma", "> alpha") + "> alpha ^old-free\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const result = mergeHighlights(body, [h("gamma"), h("alpha")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.heldAnnotations[0].reason).toBe("ambiguous-legacy");
+	});
+	it("holds a unique text when its old anchor is repeated elsewhere", () => {
+		const body = "> alpha ^old-repeated\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n> beta ^old-repeated\n> [20](kindle://book?action=open&asin=ABC&location=20)\n";
+		const result = mergeHighlights(body, [h("alpha"), h("beta", "20")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.heldAnnotations).toHaveLength(2);
+	});
+	it.each(["standalone", "attached"])("counts occupied %s memo blocks before deciding exact uniqueness", (kind) => {
+		const highlight = kind === "attached"
+			? "> abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n" : "";
+		const memoBlock = (text: string, anchor: string) =>
+			`> ${text}\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^${anchor}\n\n`;
+		const before = kind === "attached" ? [h("abc", "10", "gamma")] : [h("", "10", "gamma")];
+		const first = mergeHighlights(highlight + memoBlock("gamma", "old-used"), before, "ABC");
+		expect(first.warnings).toEqual([]);
+		const body = first.body.replace("> gamma", "> alpha") +
+			memoBlock("alpha", "old-free") + memoBlock("unrelated", "old-other");
+		const remote = kind === "attached"
+			? [{ ...h("abc"), notes: ["gamma", "alpha"] }]
+			: [h("", "10", "gamma"), h("", "10", "alpha")];
+		const result = mergeHighlights(body, remote, "ABC");
+		expect(result.body).toBe(body);
+		expect(result.added).toBe(0);
+		expect(result.heldAnnotations[0]?.reason).toBe("ambiguous-legacy");
+	});
+	it("keeps edited hash fallback conservative when another block shares the location", () => {
+		const body = "> [[Related]] Edited abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n> unrelated ^old-other\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const result = mergeHighlights(body, [h("abc")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.heldAnnotations[0].reason).toBe("ambiguous-legacy");
+	});
+	it("matches distinct anchored standalone memos at one location", () => {
+		const body = "> first memo\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^old-first-memo\n\n> second memo\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^old-second-memo\n";
+		const remote = [h("", "10", "first memo"), h("", "10", "second memo")];
+		const result = mergeHighlights(body, remote, "ABC");
+		expect(result.warnings).toEqual([]);
+		expect(result.added).toBe(0);
+		expect(result.body.startsWith(body)).toBe(true);
+		expect(mergeHighlights(result.body, remote, "ABC").body).toBe(result.body);
+	});
+	it("does not treat a legacy highlight as an identically worded standalone memo", () => {
+		const body = "> alpha ^ref-12345\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const result = mergeHighlights(body, [h("", "10", "alpha")], "ABC");
+		expect(result.added).toBe(1);
+		expect(result.body.startsWith(body)).toBe(true);
+	});
+});
+
 describe("source annotations independent of edited note text", () => {
 	it("retains an existing quote-only proof ledger when the user has a separate block ID", () => {
 		// Captured from the previous implementation, before quote scanning attached separate IDs.

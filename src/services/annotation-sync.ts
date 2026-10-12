@@ -142,10 +142,13 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 				? block
 						.slice(0, link.index)
 						.replace(
-							/\s*(?:[—–-]\s*[^:\n]+:\s*)?\[[^\]\n]*\]\($/,
+							/[ \t]*(?:[—–-][ \t]*[^:\r\n]+:[ \t]*)?\[[^\]\r\n]*\]\($/,
 							"",
 						)
 				: block;
+		// A paragraph split can leave its preceding horizontal rule attached.
+		// Clean only the comparison text; keep raw block bytes for proof compatibility.
+		if (!quote) text = text.replace(/^(?:[ \t]*-{3,}[ \t]*\r?\n)+/, "");
 		text = normalizeSourceText(
 			text.replace(/\^[A-Za-z0-9-]+(?=\s|$)/g, ""),
 		);
@@ -438,10 +441,14 @@ export function reconcileAnnotations(
 			continue;
 		}
 		const memo = !h.text?.trim();
-  const candidates = blocks.filter(b => memo
-   ? !activeTargets.has(b) && !b.anchors.some(a => /^ref-/.test(a) || highlightTargets.has(a)) &&
+  const sameKind = blocks.filter(b => memo
+   ? !b.anchors.some(a => /^ref-/.test(a) || highlightTargets.has(a))
+   : !b.anchors.some(a => memoTargets.has(a))
+  );
+  const candidates = sameKind.filter(b => memo
+   ? !activeTargets.has(b) &&
     (b.text===text || (!!loc && b.location===loc && (!used.has(b) || orphanedTargets.has(b))) || (!loc && orphanedTargets.has(b)))
-   : !b.anchors.some(a=>memoTargets.has(a)) && ((b.anchors.includes(hash) && (!b.location || b.location===loc)) || (loc && b.location===loc))
+   : ((b.anchors.includes(hash) && (!b.location || b.location===loc)) || (loc && b.location===loc))
   );
   const personalMemoMatches = memo && containsUnmarkedMemo(visible,text);
 
@@ -456,22 +463,30 @@ export function reconcileAnnotations(
 						!!loc &&
 						b.location === loc)),
 		);
-		if (
-			safe.length === 1 &&
-			candidates.length === 1 &&
-			(!memo || safe[0].anchors.length > 0)
-		)
-			proposals.push({ key, block: safe[0] });
+		// Count exact matches before excluding occupied/unsafe targets: a second
+		// identical block must never become unambiguous merely because it is used.
+		const exact = sameKind.filter(
+			(b) => !!loc && b.location === loc && b.text === text,
+		);
+		const exactTarget = exact.length === 1 && safe.includes(exact[0]) &&
+			(!memo || exact[0].anchors.length > 0) ? exact[0] : undefined;
+		const fallbackTarget = exact.length === 0 && safe.length === 1 &&
+			candidates.length === 1 && (!memo || safe[0].anchors.length > 0)
+			? safe[0] : undefined;
+		const target = exactTarget ?? fallbackTarget;
+		if (target)
+			proposals.push({ key, block: target });
 		else if (
 			candidates.length ||
+			exact.length ||
 			personalMemoMatches ||
 			blocks.some((b) => b.unknown && !used.has(b))
 		) {
 			hold(
 				key,
 				"ambiguous-legacy",
-				candidates.length
-					? candidates.map(candidateName)
+				candidates.length || exact.length
+					? [...new Set([...candidates, ...exact])].map(candidateName)
 					: personalMemoMatches ? ["block:" + digest(text)] : blocks.filter((b) => b.unknown).map(candidateName),
 			);
 		} else missing.push(h);
