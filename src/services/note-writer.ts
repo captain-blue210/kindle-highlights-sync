@@ -1,3 +1,11 @@
+import {
+	DestinationInvalidation,
+	DestinationHoldReason,
+	DestinationResolution,
+	NoteDestinations,
+	noteAsin,
+	resolveNoteDestination,
+} from "./note-destination";
 import { BookStatus, SyncIssue, safeErrorMessage } from "./sync-progress";
 import type { Book, Highlight } from "../models";
 import {
@@ -8,7 +16,6 @@ import {
 } from "./note-properties";
 import {
 	bookProperties,
-	findExistingNote,
 	NoteSnapshot,
 	renderHighlight,
 	syncNoteContent,
@@ -22,12 +29,17 @@ import {
 } from "./annotation-sync";
 
 export interface NoteWriterIO {
+	/** Stable creation time; explicit selections require this capability. */
+	identity?(path: string): number | undefined;
+	/** Desktop filesystem identity, independent of user-preserved timestamps. */
+	fileIdentity?(path: string): string | undefined;
 	list(): string[];
 	read(path: string): Promise<string>;
 	create(path: string, content: string): Promise<void>;
 	process(path: string, fn: (content: string) => string): Promise<void>;
 }
 export interface NoteWriterSettings {
+	noteDestinations?: NoteDestinations;
 	outputDirectory: string;
 	templateContent: string;
 	propertyNames: PropertyNames;
@@ -39,11 +51,10 @@ export interface NoteSaveOutcome {
 	path?: string;
 	reason?: string;
 	heldAnnotations?: HeldAnnotation[];
+	candidates?: string[];
 }
 export interface NoteSaveOptions {
-	/** #34 supplies the chosen note. A missing/mismatched target never falls back. */
 	targetPaths?: Record<string, string>;
-	/** User-confirmed mappings belong to one destination, never the entire ASIN. */
 	annotationOptionsByPath?: Record<string, AnnotationSyncOptions>;
 }
 export function normalizeOutputDirectory(path: string): string {
@@ -103,8 +114,21 @@ export async function saveBookNotes(
 	};
 	for (const path of paths) {
 		try {
-			notes.push({ path, content: await io.read(path) });
+			notes.push({
+				path,
+				ctime: io.identity?.(path),
+				fileId: io.fileIdentity?.(path),
+				content: await io.read(path),
+			});
 		} catch {
+			// A selected file removed after list() is a destination hold, not a failed scan.
+			if (
+				!io.list().includes(path) &&
+				Object.values(settings.noteDestinations ?? {}).some(
+					(s) => s.path === path,
+				)
+			)
+				continue;
 			result.errors.push(`${path}: unreadable note`);
 			scanIssues.push({
 				phase: "save",
@@ -135,43 +159,120 @@ export async function saveBookNotes(
 			book.asin,
 		);
 		const outcome: BookOutcome = { status: "success", issues: [] };
+		let resolution: DestinationResolution | undefined;
 		try {
 			const selectedPath = options.targetPaths?.[book.asin];
-			const selected = selectedPath
-				? notes.find((n) => n.path === selectedPath)
-				: undefined;
-			if (selectedPath !== undefined && !selected)
-				throw new Error("Selected note is unavailable");
+			const persisted = settings.noteDestinations?.[book.asin];
 			if (
-				selected &&
-				safeProperties(selected.content, settings)?.asin !== book.asin
+				persisted &&
+				selectedPath !== undefined &&
+				persisted.path !== selectedPath
 			)
-				throw new Error("Selected note has a different ASIN");
-			const existing =
-				selected ??
-				findExistingNote(
+				throw new DestinationHeld({
+					reason: "destination-invalid",
+					invalidateSelection: false,
+					candidates: notes
+						.filter(
+							(n) =>
+								noteAsin(
+									n,
+									settings.propertyNames,
+									settings.propertyNameHistory,
+								) === book.asin,
+						)
+						.map((n) => n.path),
+					selectedPath: persisted.path,
+				});
+			if (selectedPath !== undefined && !persisted) {
+				const selected = notes.find((n) => n.path === selectedPath);
+				if (!selected) throw new Error("Selected note is unavailable");
+				if (
+					noteAsin(
+						selected,
+						settings.propertyNames,
+						settings.propertyNameHistory,
+					) !== book.asin
+				)
+					throw new Error("Selected note has a different ASIN");
+				// Transient result supplied by a caller. Persisted UI choices always use #34's identity guard.
+				resolution = {
+					status: "existing",
+					note: selected,
+					explicit: false,
+				};
+			} else
+				resolution = resolveNoteDestination(
 					notes,
 					book,
+					settings.noteDestinations,
 					settings.propertyNames,
 					settings.propertyNameHistory,
 				);
+			if (resolution.status === "held")
+				throw new DestinationHeld(resolution);
+			const existing =
+				resolution.status === "existing" ? resolution.note : undefined;
 			if (existing) {
 				let added = 0,
 					warnings: string[] = [];
 				let heldAnnotations: HeldAnnotation[] = [];
 				let savedContent = existing.content;
 				await io.process(existing.path, (current) => {
+					if (
+						resolution?.status === "existing" &&
+						resolution.explicit
+					) {
+						const fresh = resolveNoteDestination(
+							[
+								{
+									path: existing.path,
+									content: current,
+									ctime: io.identity?.(existing.path),
+									fileId: io.fileIdentity?.(existing.path),
+								},
+							],
+							book,
+							settings.noteDestinations,
+							settings.propertyNames,
+							settings.propertyNameHistory,
+						);
+						if (fresh.status === "held")
+							throw new DestinationHeld({
+								...fresh,
+								candidates: notes
+									.filter(
+										(n) =>
+											noteAsin(
+												n,
+												settings.propertyNames,
+												settings.propertyNameHistory,
+											) === book.asin,
+									)
+									.map((n) => n.path)
+									.sort(),
+							});
+					}
 					// Read fresh properties inside the atomic process, never apply a stale snapshot.
 					const properties = readBookProperties(
 						current,
 						settings.propertyNames,
 						settings.propertyNameHistory,
 					);
+
 					if (
-						!properties ||
 						(selectedPath !== undefined &&
-							properties.asin !== book.asin) ||
-						(properties.asin && properties.asin !== book.asin)
+							noteAsin(
+								{ path: existing.path, content: current },
+								settings.propertyNames,
+								settings.propertyNameHistory,
+							) !== book.asin) ||
+						(!properties &&
+							noteAsin(
+								{ path: existing.path, content: current },
+								settings.propertyNames,
+								settings.propertyNameHistory,
+							) !== book.asin) ||
+						(properties?.asin && properties.asin !== book.asin)
 					)
 						throw new Error(
 							"Note identity changed during synchronization",
@@ -314,24 +415,91 @@ export async function saveBookNotes(
 				result.added += bookHighlights.length;
 			}
 		} catch (error) {
-			result.failed++;
-			result.outcomes.push({
-				asin: book.asin,
-				status: "failed",
-				reason:
-					error instanceof Error &&
-					error.message === "Multiple notes have the same ASIN"
-						? "duplicate-note-asin"
-						: "note-save-failed",
-			});
-			outcome.status = "failed";
-			const message = safeErrorMessage(error);
-			outcome.issues.push({
-				phase: "save",
-				bookTitle: book.title,
-				message,
-			});
-			result.errors.push(`${book.title}: ${message}`);
+			if (
+				resolution?.status === "existing" &&
+				resolution.explicit &&
+				error instanceof Error &&
+				[
+					"Note unavailable",
+					"Note identity changed during synchronization",
+				].includes(error.message)
+			) {
+				error = new DestinationHeld({
+					reason: io.list().includes(resolution.note.path)
+						? "destination-identity-changed"
+						: "destination-missing",
+					candidates: notes
+						.filter(
+							(n) =>
+								noteAsin(
+									n,
+									settings.propertyNames,
+									settings.propertyNameHistory,
+								) === book.asin,
+						)
+						.map((n) => n.path)
+						.sort(),
+					selectedPath: resolution.note.path,
+				});
+			}
+			if (error instanceof DestinationHeld) {
+				result.held++;
+				const { reason, candidates, selectedPath } = error.resolution;
+				const selected = settings.noteDestinations?.[book.asin];
+				if (
+					selected &&
+					selectedPath === selected.path &&
+					error.resolution.invalidateSelection !== false &&
+					!selected.invalidated
+				) {
+					selected.invalidated = reason.replace(
+						"destination-",
+						"",
+					) as DestinationInvalidation;
+				}
+				result.outcomes.push({
+					asin: book.asin,
+					status: "held",
+					reason,
+					candidates,
+					...(selectedPath ? { path: selectedPath } : {}),
+				});
+				outcome.status = "held";
+				outcome.issues.push({
+					phase: "save",
+					bookTitle: book.title,
+					...(selectedPath ? { path: selectedPath } : {}),
+					message: reason,
+				});
+				for (const path of candidates)
+					outcome.issues.push({
+						phase: "save",
+						bookTitle: book.title,
+						path,
+						message:
+							"Destination candidate; choose a sync destination in settings",
+					});
+				result.errors.push(`${book.title}: ${reason}`);
+			} else {
+				result.failed++;
+				result.outcomes.push({
+					asin: book.asin,
+					status: "failed",
+					reason:
+						error instanceof Error &&
+						error.message === "Multiple notes have the same ASIN"
+							? "duplicate-note-asin"
+							: "note-save-failed",
+				});
+				outcome.status = "failed";
+				const message = safeErrorMessage(error);
+				outcome.issues.push({
+					phase: "save",
+					bookTitle: book.title,
+					message,
+				});
+				result.errors.push(`${book.title}: ${message}`);
+			}
 		} finally {
 			result.issues.push(...outcome.issues);
 			onBookSettled?.(book, index, outcome);
@@ -348,5 +516,19 @@ function safeProperties(content: string, settings: NoteWriterSettings) {
 		);
 	} catch {
 		return null;
+	}
+}
+
+class DestinationHeld extends Error {
+	constructor(
+		readonly resolution: {
+			reason: DestinationHoldReason;
+			candidates: string[];
+			selectedPath?: string;
+			/** Caller disagreement is not evidence that the persisted file changed. */
+			invalidateSelection?: boolean;
+		},
+	) {
+		super(resolution.reason);
 	}
 }

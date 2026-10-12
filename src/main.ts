@@ -1,3 +1,12 @@
+import { NoteDestinationModal } from "./modals/NoteDestinationModal";
+import {
+	NoteDestination,
+	groupNoteDestinations,
+	invalidateNoteDestinations,
+	noteAsin,
+	readNoteDestinations,
+} from "./services/note-destination";
+import type { NoteSnapshot } from "./services/note-sync";
 import {
 	BookCounts,
 	SyncErrorRecord,
@@ -45,6 +54,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 	private disposed = false;
 	private releaseBackgroundExecution: (() => void) | undefined;
 	private settingsSave: Promise<void> = Promise.resolve();
+	private pendingDestination?: { asin: string; selection: NoteDestination };
 	private diagnosticRevision = 0;
 	private previews = new WeakMap<MigrationPreview, string>();
 	lastSyncResult: Awaited<ReturnType<typeof saveBookNotes>> | undefined;
@@ -69,6 +79,21 @@ export default class KindleHighlightsPlugin extends Plugin {
 	async onload() {
 		await loadTranslations();
 		await this.loadSettings();
+		this.registerEvent(
+			this.app.vault.on("rename", (_file, oldPath) => {
+				void this.invalidateDestinations(oldPath, "renamed");
+			}),
+		);
+		this.registerEvent(
+			this.app.vault.on("delete", (file) => {
+				void this.invalidateDestinations(file.path, "deleted");
+			}),
+		);
+		this.addCommand({
+			id: "choose-kindle-sync-destination",
+			name: t("destinations.title"),
+			callback: () => this.showNoteDestinations(),
+		});
 		this.kindleApiService = new KindleApiService(
 			this.app,
 			this.settings.amazonSessionSecrets,
@@ -112,7 +137,9 @@ export default class KindleHighlightsPlugin extends Plugin {
 			try {
 				this.releaseBackgroundExecution?.();
 			} catch {
-				console.error("Kindle background timer setting could not be restored");
+				console.error(
+					"Kindle background timer setting could not be restored",
+				);
 			}
 			this.releaseBackgroundExecution = undefined;
 		}
@@ -130,15 +157,33 @@ export default class KindleHighlightsPlugin extends Plugin {
 				? saved.propertyNameHistory
 				: [],
 			amazonSessionSecrets: { ...saved.amazonSessionSecrets },
+			noteDestinations: readNoteDestinations(saved.noteDestinations),
 			lastErrorRecord: readErrorRecord(saved.lastErrorRecord),
 		};
 		validatePropertyNames(this.settings.propertyNames);
 	}
-	async saveSettings() {
+	async saveSettings(destination?: {
+		asin: string;
+		selection: NoteDestination;
+	}) {
 		const snapshot = JSON.parse(JSON.stringify(this.settings));
 		const saving = this.settingsSave
 			.catch(() => {})
-			.then(() => this.saveData(snapshot));
+			.then(async () => {
+				// Destination changes commit only after persistence succeeds. A queued ordinary
+				// settings snapshot must include the latest committed table, never a provisional one.
+				snapshot.noteDestinations = JSON.parse(
+					JSON.stringify(this.settings.noteDestinations),
+				);
+				if (destination)
+					snapshot.noteDestinations[destination.asin] = {
+						...destination.selection,
+					};
+				await this.saveData(snapshot);
+				if (destination)
+					this.settings.noteDestinations[destination.asin] =
+						destination.selection;
+			});
 		this.settingsSave = saving;
 		await saving;
 	}
@@ -304,6 +349,125 @@ export default class KindleHighlightsPlugin extends Plugin {
 			new Notice(t("migration.failed"));
 		}
 	}
+
+	async invalidateDestinations(path: string, reason: "renamed" | "deleted") {
+		const changed = invalidateNoteDestinations(
+			this.settings.noteDestinations,
+			path,
+			reason,
+		);
+		const pending = this.pendingDestination;
+		const pendingChanged = pending
+			? invalidateNoteDestinations(
+					{ [pending.asin]: pending.selection },
+					path,
+					reason,
+				)
+			: false;
+		if (!changed && !pendingChanged) return;
+		try {
+			await this.saveSettings();
+		} catch {
+			new Notice(t("destinations.failed"));
+		}
+	}
+	async selectNoteDestination(asin: string, candidate: NoteSnapshot) {
+		if (this.busy || this.disposed) throw new Error(t("sync.busy"));
+		this.busy = true;
+		try {
+			const io = createVaultIO(this.app);
+			const dir = normalizeOutputDirectory(this.settings.outputDirectory);
+			const path = candidate.path;
+			if (
+				!path.endsWith(".md") ||
+				!(dir ? path.startsWith(dir + "/") : !path.includes("/")) ||
+				!io.list().includes(path)
+			)
+				throw new Error("Destination preview is stale");
+			const ctime = io.identity?.(path);
+			const fileId = io.fileIdentity?.(path);
+			if (!fileId || fileId !== candidate.fileId)
+				throw new Error(
+					"Desktop vault filesystem identity unavailable",
+				);
+			if (
+				!ctime ||
+				!Number.isFinite(ctime) ||
+				ctime < 0 ||
+				ctime !== candidate.ctime
+			)
+				throw new Error("Destination preview is stale");
+			const content = await io.read(path);
+			if (
+				this.disposed ||
+				io.identity?.(path) !== ctime ||
+				io.fileIdentity?.(path) !== fileId ||
+				noteAsin(
+					{ path, content },
+					this.settings.propertyNames,
+					this.settings.propertyNameHistory,
+				) !== asin
+			)
+				throw new Error("Destination preview is stale");
+			const selection: NoteDestination = { path, ctime, fileId };
+			const pending = { asin, selection };
+			this.pendingDestination = pending;
+			await this.saveSettings(pending);
+		} finally {
+			this.pendingDestination = undefined;
+			this.busy = false;
+		}
+	}
+	async showNoteDestinations() {
+		if (this.busy || this.disposed) {
+			new Notice(t("sync.busy"));
+			return;
+		}
+		this.busy = true;
+		try {
+			const io = createVaultIO(this.app);
+			const dir = normalizeOutputDirectory(this.settings.outputDirectory);
+			const notes: NoteSnapshot[] = [];
+			for (const path of io
+				.list()
+				.filter(
+					(p) =>
+						p.endsWith(".md") &&
+						(dir ? p.startsWith(dir + "/") : !p.includes("/")),
+				)) {
+				notes.push({
+					path,
+					ctime: io.identity?.(path),
+					fileId: io.fileIdentity?.(path),
+					content: await io.read(path),
+				});
+			}
+			if (!this.disposed)
+				new NoteDestinationModal(
+					this.app,
+					groupNoteDestinations(
+						notes,
+						this.settings.noteDestinations,
+						this.settings.propertyNames,
+						this.settings.propertyNameHistory,
+					),
+					async (asin, note) => {
+						// The preview's IO retains the original TFile pin, including same-ctime replacements.
+						if (
+							io.identity?.(note.path) !== note.ctime ||
+							io.fileIdentity?.(note.path) !== note.fileId
+						)
+							throw new Error("Destination preview is stale");
+						await this.selectNoteDestination(asin, note);
+					},
+				).open();
+		} catch {
+			new Notice(t("destinations.failed"));
+		} finally {
+			this.busy = false;
+		}
+	}
+
 	async syncHighlights() {
 		if (this.disposed) return;
 		if (this.busy) {
@@ -315,6 +479,9 @@ export default class KindleHighlightsPlugin extends Plugin {
 		const settings: KindleHighlightsSettings = JSON.parse(
 			JSON.stringify(this.settings),
 		);
+        // Vault events can invalidate destinations while fetching or saving.
+        settings.noteDestinations=this.settings.noteDestinations;
+        const destinationsBeforeSave=JSON.stringify(settings.noteDestinations);
 		const diagnostics: NonNullable<
 			KindleHighlightsPlugin["lastSyncDiagnostics"]
 		> = {
@@ -442,6 +609,8 @@ export default class KindleHighlightsPlugin extends Plugin {
 				},
 			);
 			diagnostics.noteSave = JSON.parse(JSON.stringify(result));
+			if (JSON.stringify(settings.noteDestinations) !== destinationsBeforeSave)
+				await this.saveSettings();
 			for (const row of exclusions) {
 				result.errors.push(`Notebook row ${row.row}${row.asin ? ` (ASIN: ${row.asin})` : ""}: ${row.reason}`);
 			}

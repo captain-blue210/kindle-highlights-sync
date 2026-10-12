@@ -48,6 +48,9 @@ export interface SyncProgressState {
 // Only recognized application reasons and system codes cross the diagnostics boundary.
 // Raw Electron/Keychain/renderer exceptions may contain cookies, URLs or response bodies.
 const reasons = new Set([
+ "destination-unselected", "destination-missing", "destination-identity-changed",
+ "destination-renamed", "destination-deleted", "destination-invalid",
+ "Destination candidate; choose a sync destination in settings",
 	"Multiple notes have the same ASIN",
 	"Multiple notes have the same book ID",
 	"Note identity changed during synchronization",
