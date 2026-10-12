@@ -85,6 +85,24 @@ describe("unique exact legacy correspondence", () => {
 		expect(result.body).toBe(body);
 		expect(result.heldAnnotations).toHaveLength(2);
 	});
+	it.each(["standalone", "attached"])("counts occupied %s memo blocks before deciding exact uniqueness", (kind) => {
+		const highlight = kind === "attached"
+			? "> abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n" : "";
+		const memoBlock = (text: string, anchor: string) =>
+			`> ${text}\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^${anchor}\n\n`;
+		const before = kind === "attached" ? [h("abc", "10", "gamma")] : [h("", "10", "gamma")];
+		const first = mergeHighlights(highlight + memoBlock("gamma", "old-used"), before, "ABC");
+		expect(first.warnings).toEqual([]);
+		const body = first.body.replace("> gamma", "> alpha") +
+			memoBlock("alpha", "old-free") + memoBlock("unrelated", "old-other");
+		const remote = kind === "attached"
+			? [{ ...h("abc"), notes: ["gamma", "alpha"] }]
+			: [h("", "10", "gamma"), h("", "10", "alpha")];
+		const result = mergeHighlights(body, remote, "ABC");
+		expect(result.body).toBe(body);
+		expect(result.added).toBe(0);
+		expect(result.heldAnnotations[0]?.reason).toBe("ambiguous-legacy");
+	});
 	it("keeps edited hash fallback conservative when another block shares the location", () => {
 		const body = "> [[Related]] Edited abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n> unrelated ^old-other\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
 		const result = mergeHighlights(body, [h("abc")], "ABC");

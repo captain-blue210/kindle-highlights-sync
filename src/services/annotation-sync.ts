@@ -441,10 +441,14 @@ export function reconcileAnnotations(
 			continue;
 		}
 		const memo = !h.text?.trim();
-  const candidates = blocks.filter(b => memo
-   ? !activeTargets.has(b) && !b.anchors.some(a => /^ref-/.test(a) || highlightTargets.has(a)) &&
+  const sameKind = blocks.filter(b => memo
+   ? !b.anchors.some(a => /^ref-/.test(a) || highlightTargets.has(a))
+   : !b.anchors.some(a => memoTargets.has(a))
+  );
+  const candidates = sameKind.filter(b => memo
+   ? !activeTargets.has(b) &&
     (b.text===text || (!!loc && b.location===loc && (!used.has(b) || orphanedTargets.has(b))) || (!loc && orphanedTargets.has(b)))
-   : !b.anchors.some(a=>memoTargets.has(a)) && ((b.anchors.includes(hash) && (!b.location || b.location===loc)) || (loc && b.location===loc))
+   : ((b.anchors.includes(hash) && (!b.location || b.location===loc)) || (loc && b.location===loc))
   );
   const personalMemoMatches = memo && containsUnmarkedMemo(visible,text);
 
@@ -461,7 +465,7 @@ export function reconcileAnnotations(
 		);
 		// Count exact matches before excluding occupied/unsafe targets: a second
 		// identical block must never become unambiguous merely because it is used.
-		const exact = candidates.filter(
+		const exact = sameKind.filter(
 			(b) => !!loc && b.location === loc && b.text === text,
 		);
 		const exactTarget = exact.length === 1 && safe.includes(exact[0]) &&
@@ -474,14 +478,15 @@ export function reconcileAnnotations(
 			proposals.push({ key, block: target });
 		else if (
 			candidates.length ||
+			exact.length ||
 			personalMemoMatches ||
 			blocks.some((b) => b.unknown && !used.has(b))
 		) {
 			hold(
 				key,
 				"ambiguous-legacy",
-				candidates.length
-					? candidates.map(candidateName)
+				candidates.length || exact.length
+					? [...new Set([...candidates, ...exact])].map(candidateName)
 					: personalMemoMatches ? ["block:" + digest(text)] : blocks.filter((b) => b.unknown).map(candidateName),
 			);
 		} else missing.push(h);
