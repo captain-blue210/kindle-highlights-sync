@@ -13,7 +13,7 @@
 - 削除・追加メモ等の操作はIDの一部を `highlightId` として送信する。
 - `handleReadMore` は注釈IDからDOMを選び、`#kp-annotation-location` を読む。
 
-これによりIDの存在と用途は確認できた。ただし同一アカウント・同一注釈を再取得した際のID安定性、note-only IDの形状・挙動は実画面で未確認。主キーとして採用せず、取得できたDOM IDを `sourceAnnotationId` / `sourceHighlightId` に保存する。#31のnote-only HTML抽出改善はこの変更に含めない。識別・保存はすでに `text: "", note: "…"` を受け入れる。
+これによりIDの存在と用途は確認できた。初期調査では再取得時の安定性とnote-onlyの実DOMは未確認だったが、後続でハイライト677件と独立メモ1件の短時間再取得一致を確認した。主キーとして採用せず、取得できたDOM IDを `sourceAnnotationId` / `sourceHighlightId` に保存する。#31のnote-only HTML抽出改善はこの変更に含めない。識別・保存はすでに `text: "", note: "…"` を受け入れる。
 
 ## ノート内の対応台帳
 
@@ -112,7 +112,7 @@ saveBookNotes(io, settings, books, highlights, onBook, onBookSettled, {
 
 ## 未確認事項の追補（2026-10-12）
 
-日本のNotebookで3冊677件のIDを再取得比較し、すべて一致した。長期・編集後・note-only IDの保証は引き続き未確認。主キーの方式は変更していない。
+日本のNotebookで3冊677件のIDを再取得比較し、すべて一致した。その後、利用者が作成したハイライト本文を伴わない独立メモ1件を実DOMで確認し、再読み込み後の注釈行IDと子メモIDも一致した。現在の抽出処理は本文のない行をスキップするため、取込対応は#31に残る。長期・編集後・削除再作成後のID保証は引き続き未確認。主キーの方式は変更していない。
 
 #34との統合候補は `codex/verify-issues-33-34`（最終コード32b1f75）。初回254テスト、最終257テスト・型チェック・buildを確認し、実ノート241件の複製で選択先隔離・連続同期・新規追加・保存後例外回復と実Fletcher16衝突の保留解除を検証した。原本は全件hash不変。
 
