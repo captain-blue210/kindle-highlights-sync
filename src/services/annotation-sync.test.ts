@@ -13,6 +13,32 @@ const h = (text: string, location = "10", note?: string): Highlight => ({
 });
 
 describe("legacy plain Markdown comparison", () => {
+	it.each(["\n", "\r\n"])("keeps source punctuation before the terminal location caption with %j", (newline) => {
+		const cases = [
+			{ text: "power-driven", separator: "—", label: "location" },
+			{ text: "well - known", separator: "—", label: "location" },
+			{ text: "suffi- ciently a curiosity", separator: "—", label: "location" },
+			{ text: "alpha — aside", separator: "—", label: "location" },
+			{ text: "alpha - middle", separator: "-", label: "location" },
+			{ text: "alpha-beta", separator: "-", label: "kindle-location" },
+			{ text: "prefix: power-driven", separator: "–", label: "location" },
+			{ text: "--\npower-driven", separator: "—", label: "location" },
+			{ text: "power-driven", separator: "—", label: "location", gap: "" },
+			{ text: "alpha—aside", separator: "–", label: "location", gap: "" },
+		];
+		for (const {text, separator, label, gap = " "} of cases) {
+			const body = `${text}${gap}${separator} ${label}: [10](kindle://book?action=open&asin=ABC&location=10) ^old-text\n`.replace(/\n/g, newline);
+			const remote = [h(text)];
+			const first = mergeHighlights(body, remote, "ABC");
+			expect(first.warnings, text).toEqual([]);
+			expect(first.added, text).toBe(0);
+			expect(first.body.startsWith(body), text).toBe(true);
+			const payload = first.body.match(/<!-- kindle-sync:v1 (\S+) -->/)![1];
+			expect(Object.values(JSON.parse(Buffer.from(payload, "base64").toString()).entries), text)
+				.toEqual([{ anchor: "old-text" }]);
+			expect(mergeHighlights(first.body, remote, "ABC").body, text).toBe(first.body);
+		}
+	});
 	it.each(["\n", "\r\n"])("reads text after a separator without changing %j bytes", (newline) => {
 		const body = [
 			"alpha — location: [10](kindle://book?action=open&asin=ABC&location=10) ^old-alpha",

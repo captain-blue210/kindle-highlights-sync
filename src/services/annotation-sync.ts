@@ -142,7 +142,8 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 				? block
 						.slice(0, link.index)
 						.replace(
-							/[ \t]*(?:[—–-][ \t]*[^:\r\n]+:[ \t]*)?\[[^\]\r\n]*\]\($/,
+							// A later caption separator belongs to the suffix, not source text.
+							/[ \t]*(?:[—–-][ \t]*(?:(?![—–]|[ \t]+-)[^:\r\n])+:[ \t]*)?\[[^\]\r\n]*\]\($/,
 							"",
 						)
 				: block;
