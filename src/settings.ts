@@ -1,4 +1,5 @@
 import type {NoteDestinations} from "./services/note-destination";
+import type { BookSyncState } from "./services/book-sync-state";
 import { renderErrorRecord } from "./ui/sync-diagnostics";
 import type { SyncErrorRecord } from "./services/sync-progress";
 // settings.ts
@@ -30,6 +31,7 @@ const AMAZON_REGION_KEYS: string[] = [
 
 export interface KindleHighlightsSettings {
 	noteDestinations: NoteDestinations;
+	bookSyncState: BookSyncState;
 	lastErrorRecord?: SyncErrorRecord;
 	outputDirectory: string;
 	templateContent: string;
@@ -42,6 +44,7 @@ export interface KindleHighlightsSettings {
 
 export const DEFAULT_SETTINGS: KindleHighlightsSettings = {
 	noteDestinations: {},
+	bookSyncState: {},
 	outputDirectory: "Kindle Highlights",
 	templateContent: `---
 aliases:

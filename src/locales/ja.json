@@ -3,6 +3,9 @@
     "syncKindleHighlights": {
       "name": "Kindleハイライトを同期"
     },
+    "syncAllKindleHighlights": {
+      "name": "Kindleハイライトを全件取得"
+    },
     "logoutKindle": {
       "name": "Kindleからログアウト"
     }
@@ -25,8 +28,8 @@
     "unknownError": "不明なエラー",
     "fileProcessingError": "ファイル処理エラー: {{filePath}}。ファイルオブジェクトが見つかりません。",
     "busy": "別のKindle処理が実行中です。",
-    "partial": "同期で失敗 {{failed}} 件、確認が必要なノート {{held}} 件がありました。 追加: ハイライト {{added}} 件、メモだけ {{standaloneNotes}} 件、添付メモ {{attachedNotes}} 件。",
-    "summary": "同期完了: 新規 {{created}} 件、更新 {{updated}} 件、追加ハイライト {{added}} 件。 メモだけ {{standaloneNotes}} 件、添付メモ {{attachedNotes}} 件を追加。",
+    "partial": "同期で失敗 {{failed}} 件、確認が必要なノート {{held}} 件がありました。追加: ハイライト {{added}} 件、メモだけ {{standaloneNotes}} 件、添付メモ {{attachedNotes}} 件。未変更 {{skipped}} 冊は取得を省略しました。",
+    "summary": "同期完了: 新規 {{created}} 件、更新 {{updated}} 件、追加ハイライト {{added}} 件。メモだけ {{standaloneNotes}} 件、添付メモ {{attachedNotes}} 件を追加。未変更 {{skipped}} 冊は取得を省略しました。",
     "safeFailure": "同期を完了できませんでした。認証・取得に失敗した書籍のノートは変更していません。",
     "libraryUnconfirmed": "書籍一覧の取得範囲を確認できませんでした。ノートは変更せず、取得状況を診断記録に残しました。",
     "libraryLoadFailed": "書籍一覧の追加読み込みに失敗しました。ノートは変更せず、取得状況を診断記録に残しました。",

@@ -11,6 +11,16 @@ import {
 	readNoteDestinations,
 } from "./services/note-destination";
 import type { NoteSnapshot } from "./services/note-sync";
+import type { Book } from "./models";
+import {
+	beginBookSync,
+	finishBookSync,
+	localSyncDay,
+	readBookSyncState,
+	selectBooksForSync,
+	type BookSyncContext,
+	type BookSyncState,
+} from "./services/book-sync-state";
 import {
 	BookCounts,
 	SyncErrorRecord,
@@ -68,6 +78,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 				startedAt: string;
 				finishedAt?: string;
 				region: string;
+				mode: "incremental" | "full";
 				status: "complete" | "partial" | "failed" | "login-cancelled";
 				fetch?: FetchDiagnostics;
 				noteSave?: Awaited<ReturnType<typeof saveBookNotes>>;
@@ -107,6 +118,11 @@ export default class KindleHighlightsPlugin extends Plugin {
 			id: "sync-kindle-highlights",
 			name: t("commands.syncKindleHighlights.name"),
 			callback: () => this.syncHighlights(),
+		});
+		this.addCommand({
+			id: "sync-all-kindle-highlights",
+			name: t("commands.syncAllKindleHighlights.name"),
+			callback: () => this.syncHighlights({ fullSync: true }),
 		});
 		this.addCommand({
 			id: "logout-kindle",
@@ -162,6 +178,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 				: [],
 			amazonSessionSecrets: { ...saved.amazonSessionSecrets },
 			noteDestinations: readNoteDestinations(saved.noteDestinations),
+			bookSyncState: readBookSyncState(saved.bookSyncState),
 			lastErrorRecord: readErrorRecord(saved.lastErrorRecord),
 		};
 		validatePropertyNames(this.settings.propertyNames);
@@ -169,7 +186,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 	async saveSettings(destination?: {
 		asin: string;
 		selection: NoteDestination;
-	}) {
+	}, bookSyncState?: BookSyncState) {
 		const snapshot = JSON.parse(JSON.stringify(this.settings));
 		const saving = this.settingsSave
 			.catch(() => {})
@@ -179,11 +196,14 @@ export default class KindleHighlightsPlugin extends Plugin {
 				snapshot.noteDestinations = JSON.parse(
 					JSON.stringify(this.settings.noteDestinations),
 				);
+				// Refresh queued ordinary snapshots with the last durable checkpoint.
+				snapshot.bookSyncState = JSON.parse(JSON.stringify(bookSyncState ?? this.settings.bookSyncState));
 				if (destination)
 					snapshot.noteDestinations[destination.asin] = {
 						...destination.selection,
 					};
 				await this.saveData(snapshot);
+				if (bookSyncState) this.settings.bookSyncState = bookSyncState;
 				if (destination)
 					this.settings.noteDestinations[destination.asin] =
 						destination.selection;
@@ -472,7 +492,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 		}
 	}
 
-	async syncHighlights() {
+	async syncHighlights(options: { fullSync?: boolean } = {}) {
 		if (this.disposed) return;
 		if (this.busy) {
 			new Notice(t("sync.busy"));
@@ -494,6 +514,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 			schemaVersion: 1,
 			startedAt: new Date().toISOString(),
 			region: settings.amazonRegion,
+			mode: options.fullSync ? "full" : "incremental",
 			status: "failed",
 		};
 		this.lastSyncDiagnostics = diagnostics;
@@ -504,6 +525,15 @@ export default class KindleHighlightsPlugin extends Plugin {
 		));
 		const emitter = new EventEmitter();
 		let totalBooks: number | null = null;
+		let skippedBooks = 0;
+		let selectedBooks: Book[] = [];
+		const selectionContext: BookSyncContext = {
+			region: settings.amazonRegion,
+			outputDirectory: settings.outputDirectory,
+			syncDay: localSyncDay(new Date(diagnostics.startedAt)),
+			noteDestinations: settings.noteDestinations,
+			fullSync: options.fullSync,
+		};
 		let fetchFailed = 0;
 		let excludedCount = 0;
 		let exclusions: FetchDiagnostics["excludedRows"] = [];
@@ -522,14 +552,19 @@ export default class KindleHighlightsPlugin extends Plugin {
 			"fetch:booklist:end",
 			({
 				totalBooks: total,
+				selectedBooks: selected = total,
+				skippedBooks: skipped = 0,
 				excludedRows = [],
 			}: {
 				totalBooks: number;
+				selectedBooks?: number;
+				skippedBooks?: number;
 				excludedRows?: FetchDiagnostics["excludedRows"];
 			}) => {
 				totalBooks = total;
+				skippedBooks = skipped;
 				trackExclusions(excludedRows);
-				tracker.startPhase("fetch", total);
+				tracker.startPhase("fetch", selected);
 			},
 		);
 		emitter.on(
@@ -562,7 +597,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 			const saving = phase === "save" || phase === "session";
 			return {
 				total: totalBooks === null ? null : totalBooks + excludedCount,
-				completed: saving ? tracker.state.counts.completed : 0,
+				completed: skippedBooks + (saving ? tracker.state.counts.completed : 0),
 				failed:
 					excludedCount + fetchFailed +
 					(saving
@@ -590,17 +625,38 @@ export default class KindleHighlightsPlugin extends Plugin {
 			fetchStarted = true;
 			phase = "fetch";
 			tracker.startPhase("fetch");
-			const { books, highlights, failedBooks } =
+			const { books, highlights, failedBooks, skippedBooks: skipped = skippedBooks } =
 				await this.kindleApiService.fetchHighlights(
 					settings.amazonRegion,
 					emitter,
+					{
+						selectBooks: async (listed) => {
+							if (this.disposed) throw new Error("Plugin unloaded");
+							selectionContext.outputDirectory = normalizeOutputDirectory(settings.outputDirectory);
+							selectedBooks = selectBooksForSync(listed, this.settings.bookSyncState, selectionContext);
+							await this.saveSettings(undefined, beginBookSync(this.settings.bookSyncState, selectedBooks, selectionContext));
+							if (this.disposed) throw new Error("Plugin unloaded");
+							return selectedBooks;
+						},
+					},
 				);
+			skippedBooks = skipped;
 			fetchFailed = failedBooks;
-			totalBooks ??= books.length + failedBooks;
+			totalBooks ??= books.length + failedBooks + skippedBooks;
 			trackExclusions(
 				this.kindleApiService.lastFetchDiagnostics?.excludedRows ??
 					exclusions,
 			);
+			if (this.disposed) return;
+			// Fetch completion alone leaves saving pending, including metadata failures.
+			await this.saveSettings(undefined, finishBookSync(
+				this.settings.bookSyncState,
+				selectedBooks,
+				books,
+				this.kindleApiService.lastFetchDiagnostics?.failedAnnotations.map(entry => entry.asin) ?? [],
+				[],
+				selectionContext,
+			));
 			if (this.disposed) return;
 			if (settings.downloadMetadata) {
 				phase = "metadata";
@@ -655,6 +711,14 @@ export default class KindleHighlightsPlugin extends Plugin {
 			this.lastSyncResult = result;
 			if (this.disposed) return;
 			phase = "session";
+			await this.saveSettings(undefined, finishBookSync(
+				this.settings.bookSyncState,
+				selectedBooks,
+				books,
+				this.kindleApiService.lastFetchDiagnostics?.failedAnnotations.map(entry => entry.asin) ?? [],
+				result.outcomes ?? [],
+				selectionContext,
+			));
 			await this.kindleApiService.persist(settings.amazonRegion);
 			const partial =
 				result.failed > 0 ||
@@ -671,6 +735,7 @@ export default class KindleHighlightsPlugin extends Plugin {
 					added: result.addedCounts?.highlights ?? result.added,
 					standaloneNotes: result.addedCounts?.standaloneNotes ?? 0,
 					attachedNotes: result.addedCounts?.attachedNotes ?? 0,
+					skipped: skippedBooks,
 				}),
 			);
 		} catch (error) {

@@ -25,6 +25,14 @@ After conversion these notes are managed by this plugin. To synchronize them wit
 
 ## Sync progress and errors
 
+### 通常同期と全件取得
+
+通常同期は毎回Notebookの書籍一覧を確認し、新規書籍、注釈日が変わった書籍、前回同期日の前日以降に注釈された書籍、注釈日が不明な書籍、取得・保存が未完了の書籍を取得します。初回は全書籍を取得します。注釈日は暦日で比較し、前回同期日は同期開始時の端末の日付を使います。同日内の追加を拾うため、注釈日が同じでも最近の書籍は再取得します。
+
+リージョン・ASINごとに取得と保存の状態をプラグイン設定へ記録します。保存失敗、対応付けや同期先指定の保留、途中終了の書籍は次回も対象です。取得前に未完了状態を保存し、ノートの保存成功後に完了を確定します。空の取得結果でノートを保存しなかった書籍も再取得対象に残します。保存先フォルダや明示的な同期先を変更した場合も再確認します。対象選別にノート本文を使わないため、内部リンクや手編集を更新判定に混ぜません。
+
+コマンドパレットの **Kindleハイライトを全件取得** では、一覧にある全書籍の注釈を取得します。通常同期・全件取得とも、既存の本文、旧ブロック参照、個人メモ、変更済みファイル名を保持して新しい注釈を追加します。同期結果は、未変更のため取得を省略した冊数も表示します。
+
 The sync dialog uses a centered animation, current phase and full book title, a slim progress bar, and compact completed/total, failed and review counts. The scrollable activity log records phase and book outcomes with elapsed intervals; its latest 250 entries can be copied. Fetching and saving are reported separately, including notes that need no changes. Closing the dialog allows sync and logging to continue. The bar counts processed books including failures and review holds; reaching 100% with issues is reported as a partial result. Books that need no changes count as completed. Results remain visible until closed.
 
 Settings retain the latest problematic sync, connection or logout operation with safe error details across restarts. Successful operations do not clear it; use the manual clear button in settings. Credentials, cookies and page content are excluded from diagnostics.

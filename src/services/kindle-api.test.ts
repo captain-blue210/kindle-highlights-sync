@@ -6,6 +6,7 @@ vi.mock("../utils/remote-loader", () => ({ loadRemoteDom: vi.fn() }));
 import { loadRemoteDom } from "../utils/remote-loader";
 import { Notice } from "obsidian";
 import { KindleApiService } from "./kindle-api";
+import { Book } from "../models";
 const notebook = () =>
 	'<div id="kp-notebook-library">' +
 	Array.from(
@@ -250,4 +251,213 @@ it("reports mixed annotation counts consistently from page events through fetch 
  expect(pageEnd.annotationCounts).toEqual({highlights:1,standaloneNotes:1,attachedNotes:1});
  expect(bookEnd.highlightCount).toBe(1);
  expect(api.lastFetchDiagnostics?.annotationCounts).toEqual({highlights:1,standaloneNotes:1,attachedNotes:1});
+});
+
+describe("Kindle annotation selection", () => {
+	const notebookUrl = "https://read.amazon.co.jp/notebook";
+	const selectedNotebook =
+		'<div id="kp-notebook-library">' +
+		[0, 1, 2]
+			.map(
+				(index) =>
+					`<div class="kp-notebook-library-each-book" id="ASIN${index}"><h2 class="kp-notebook-searchable">Book ${index}</h2></div>`,
+			)
+			.join("") +
+		"</div>";
+	const annotationUrl = (asin: string) =>
+		`${notebookUrl}?asin=${asin}&contentLimitState=&token=`;
+
+	function serveNotebookAndAnnotations(failedAsin?: string) {
+		const visited: string[] = [];
+		vi.mocked(loadRemoteDom).mockImplementation(async (url) => {
+			visited.push(url);
+			if (failedAsin && url === annotationUrl(failedAsin))
+				throw Error("Notebook navigation timed out");
+			const html = url === notebookUrl
+				? selectedNotebook
+				: fragment("Selected highlight");
+			return {
+				dom: cheerio.load(html) as unknown as cheerio.CheerioAPI,
+				html,
+				finalUrl: url,
+				library: { status: "complete", snapshots: [] },
+			};
+		});
+		return visited;
+	}
+
+	it("requests annotations only for selected books and reports the full library size", async () => {
+		const visited = serveNotebookAndAnnotations();
+		const api = readyApi();
+		const emitter = new EventEmitter();
+		const bookLists: unknown[] = [];
+		emitter.on("fetch:booklist:end", (event) => bookLists.push(event));
+		const result = await api.fetchHighlights("co.jp", emitter, {
+			selectBooks: async (books: Book[]) =>
+				books.filter((book) => book.asin === "ASIN1"),
+		});
+
+		expect(visited).toEqual([notebookUrl, annotationUrl("ASIN1")]);
+		expect(result.books.map((book) => book.asin)).toEqual(["ASIN1"]);
+		expect(result.highlights.map((highlight) => highlight.bookId)).toEqual([
+			"ASIN1",
+		]);
+		expect(result.failedBooks).toBe(0);
+		expect(result.skippedBooks).toBe(2);
+		expect(bookLists).toEqual([
+			{ totalBooks: 3, selectedBooks: 1, skippedBooks: 2, excludedRows: [] },
+		]);
+		expect(api.lastFetchDiagnostics).toMatchObject({
+			parsedAsins: ["ASIN0", "ASIN1", "ASIN2"],
+			selectedAsins: ["ASIN1"],
+			skippedAsins: ["ASIN0", "ASIN2"],
+			fetchedAsins: ["ASIN1"],
+		});
+	});
+
+	it("refreshes and parses the full notebook before selection on every call", async () => {
+		const visited: string[] = [];
+		vi.mocked(loadRemoteDom).mockImplementation(async (url) => {
+			visited.push(url);
+			const html = visited.length === 1 ? oneBook : selectedNotebook;
+			return {
+				dom: cheerio.load(html) as unknown as cheerio.CheerioAPI,
+				html,
+				finalUrl: url,
+				library: { status: "complete", snapshots: [] },
+			};
+		});
+		const api = readyApi();
+		const selectedFrom: string[][] = [];
+		const options = {
+			selectBooks: async (books: Book[]) => {
+				selectedFrom.push(books.map((book) => book.asin));
+				return [];
+			},
+		};
+		await api.fetchHighlights("co.jp", new EventEmitter(), options);
+		await api.fetchHighlights("co.jp", new EventEmitter(), options);
+
+		expect(visited).toEqual([notebookUrl, notebookUrl]);
+		expect(selectedFrom).toEqual([
+			["ASIN0"],
+			["ASIN0", "ASIN1", "ASIN2"],
+		]);
+	});
+
+	it("makes no annotation requests when selection is empty", async () => {
+		const visited = serveNotebookAndAnnotations();
+		const api = readyApi();
+		const result = await api.fetchHighlights("co.jp", new EventEmitter(), {
+			selectBooks: async () => [],
+		});
+
+		expect(visited).toEqual([notebookUrl]);
+		expect(result).toEqual({ books: [], highlights: [], failedBooks: 0, skippedBooks: 3 });
+		expect(api.lastFetchDiagnostics).toMatchObject({
+			selectedAsins: [],
+			skippedAsins: ["ASIN0", "ASIN1", "ASIN2"],
+			fetchedAsins: [],
+			failedAnnotations: [],
+		});
+	});
+
+	it.each(["unconfirmed", "load-failed"] as const)(
+		"rejects a %s library before invoking selection",
+		async (status) => {
+			const visited: string[] = [];
+			vi.mocked(loadRemoteDom).mockImplementation(async (url) => {
+				visited.push(url);
+				return {
+					dom: cheerio.load(selectedNotebook) as unknown as cheerio.CheerioAPI,
+					html: selectedNotebook,
+					finalUrl: url,
+					library: { status, snapshots: [] },
+				};
+			});
+			let selectionInvoked = false;
+			await expect(
+				readyApi().fetchHighlights("co.jp", new EventEmitter(), {
+					selectBooks: async (books: Book[]) => {
+						selectionInvoked = true;
+						return books;
+					},
+				}),
+			).rejects.toThrow(status === "load-failed"
+				? "Notebook library loading failed"
+				: "Notebook library range unconfirmed");
+			expect(selectionInvoked).toBe(false);
+			expect(visited).toEqual([notebookUrl]);
+		},
+	);
+
+	it("waits for asynchronous selection before requesting any annotations", async () => {
+		const visited = serveNotebookAndAnnotations();
+		let releaseSelection!: (books: Book[]) => void;
+		const selection = new Promise<Book[]>((resolve) => { releaseSelection = resolve; });
+		let selectedBooks: Book[] = [];
+		const fetching = readyApi().fetchHighlights("co.jp", new EventEmitter(), {
+			selectBooks: (books: Book[]) => {
+				selectedBooks = books.filter((book) => book.asin === "ASIN2");
+				return selection;
+			},
+		});
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const visitedBeforeSelectionFinished = [...visited];
+		releaseSelection(selectedBooks);
+		const result = await fetching;
+
+		expect(visitedBeforeSelectionFinished).toEqual([notebookUrl]);
+		expect(visited).toEqual([notebookUrl, annotationUrl("ASIN2")]);
+		expect(result.books.map((book) => book.asin)).toEqual(["ASIN2"]);
+	});
+
+	it("aborts without annotation requests when selection rejects", async () => {
+		const visited = serveNotebookAndAnnotations();
+		const selectionError = Error("Selection unavailable");
+		await expect(
+			readyApi().fetchHighlights("co.jp", new EventEmitter(), {
+				selectBooks: async () => { throw selectionError; },
+			}),
+		).rejects.toBe(selectionError);
+		expect(visited).toEqual([notebookUrl]);
+	});
+
+	it("counts only failed selected books as failures", async () => {
+		const visited = serveNotebookAndAnnotations("ASIN2");
+		const api = readyApi();
+		const result = await api.fetchHighlights("co.jp", new EventEmitter(), {
+			selectBooks: async (books: Book[]) =>
+				books.filter((book) => book.asin !== "ASIN1"),
+		});
+
+		expect(visited).toEqual([notebookUrl, annotationUrl("ASIN0"), annotationUrl("ASIN2")]);
+		expect(result.books.map((book) => book.asin)).toEqual(["ASIN0"]);
+		expect(result.failedBooks).toBe(1);
+		expect(result.skippedBooks).toBe(1);
+		expect(api.lastFetchDiagnostics).toMatchObject({
+			selectedAsins: ["ASIN0", "ASIN2"],
+			skippedAsins: ["ASIN1"],
+			failedAnnotations: [{ asin: "ASIN2", reason: "annotation-fetch-failed" }],
+		});
+	});
+
+	it("selects the entire notebook by default and always reports selection diagnostics", async () => {
+		const visited = serveNotebookAndAnnotations();
+		const api = readyApi();
+		const result = await api.fetchHighlights("co.jp", new EventEmitter());
+
+		expect(visited).toEqual([
+			notebookUrl,
+			annotationUrl("ASIN0"),
+			annotationUrl("ASIN1"),
+			annotationUrl("ASIN2"),
+		]);
+		expect(result.books).toHaveLength(3);
+		expect(result.skippedBooks).toBe(0);
+		expect(api.lastFetchDiagnostics).toMatchObject({
+			selectedAsins: ["ASIN0", "ASIN1", "ASIN2"],
+			skippedAsins: [],
+		});
+	});
 });
