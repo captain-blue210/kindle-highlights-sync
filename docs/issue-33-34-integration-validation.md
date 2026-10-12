@@ -47,13 +47,38 @@
 - `npm run build`: 成功。
 - `git diff --check`: 成功。
 
-## 実Obsidianの残る制約
+## インストーラー更新と実Obsidian検証
 
-インストール済みアプリのInfo.plistはinstaller 1.9.14。更新済みアプリpackageは1.14.4だが、`obsidian help` は古いinstallerの警告だけを返し、CLIを利用できなかった。公式[CLIドキュメント](https://obsidian.md/help/cli)も新しいinstallerを必要条件としている。現在のComputer Use接続ではnative app操作が提供されていない。
+利用者の指示で公式Mac Universal installerを1.9.14から1.14.4へ更新した。配布元は[公式ダウンロード](https://obsidian.md/download)から辿ったobsidianmd/obsidian-releases。署名・Apple公証を確認し、旧アプリを退避して通常再起動した。CLIは `1.14.4 (installer 1.14.4)` を返し、既存Vaultへの接続も確認した。
 
-実ObsidianでのModal表示、設定の永続化、Vaultイベント順序、block参照の描画・移動、実ランタイム上の同期は未確認。installer更新について利用者に確認を依頼済み。承認されるまでインストーラーの置換・アプリ終了・実Vaultへの配布は行わない。実画面確認も複製Vaultで行う。
+認証情報を含まない新しい複製VaultにMarkdown241件と統合検証ビルド（32b1f75）だけを配置した。通信／認証境界に読み取り済み2注釈と検証専用1注釈を注入し、プラグイン本体の同期フロー、実Vault.process、TFile、実MetadataCache、実Modal・設定保存・Markdownプレビューを使った。複製VaultのAmazonログイン／ネットワーク取得は実行していない。
 
-PR #37/#38はいずれもdraftのまま。mainへのmergeは行っていない。
+- 未指定でdestination-unselected保留、複製241件の全文保持。
+- 保存先Modalが候補2件を表示し、自動選択せず、選択前は保存ボタンを無効化。実ボタンから指定を保存し、data.jsonとプラグイン再読込後に保持。
+- 指定した1件だけを更新し、取得済み2注釈の追加0・保留0・失敗0。元本文をprefixとして保持し、他240件は変更なし。再同期は追加0で全複製ノートがbyte-identical。
+- 複製限定の新規注釈を1回だけ追加し、次回は追加0。旧ref IDと新ks IDを実MetadataCacheで確認し、両block参照の埋め込みを実プレビューで描画。
+- 新注釈をローカル編集して再同期し、追加0・保留0、編集後全文を保持。埋め込み表示も更新。
+- 実fileManager.renameFileで改名すると、Vaultイベントで指定をrenamedとして永続無効化。destination-renamedで保留し、他候補へfallbackしない。Obsidian標準のリンク更新確認で「１回だけ更新」を選ぶと、旧／新block参照は改名に追従し描画を維持。
+- 無効化後のModalは警告を表示し、自動選択しない。実ボタンで改名先を再指定すると、追加0・保留0で回復。
+- 複製の選択ノートを削除すると、deletedとして永続無効化し、destination-deletedで保留。他240件は変更なし。
+- 原本241件のSHA-256を再比較し、全件変更なし。privateな本文・ID・Vaultパス・スクリーンショットはPRに保存しない。
+
+## 実ランタイムで発見・修正したblock参照不具合
+
+生成していた `> 本文 ^ks-ID\n> 位置リンク` は、IDが引用途中にあるため実Obsidianが索引化しなかった。長いIDそのものは有効で、引用外の独立行に置くと索引化されることを比較確認した。[公式block参照の説明](https://obsidian.md/help/links)にも構造化blockのIDは独立行に置く形式が示される。
+
+新規生成を引用＋位置リンクの後の独立ID行へ変更し、添付メモはその後に置く。引用途中のIDを含む新規テンプレートは保留する。引用を削除してIDだけ残した場合もmissing-targetで保留する。既存の引用途中IDは旧本文を変更せず対応用マーカーとして扱い、既存IDの索引化を保証するものではない。
+
+独立レビューで、引用に独立IDを関連付ける変更が以前のquote-only proofを変える互換性問題を指摘された。以前の台帳を固定fixtureにしてREDを確認し、以前のproof値を維持するよう修正した。レビュー再確認ではLF／CRLF／ID後の空白で旧台帳の再同期・新規追加・編集保留が確認され、未修正Critical/Important指摘なし。
+
+- PR #37: 16ファイル／204テスト通過、型チェックを含むbuild成功。
+- 最終統合コード: 20ファイル／257テスト通過、型チェックを含むbuild成功、diff check成功。
+
+## 残る確認範囲
+
+短時間観測以外のAmazon IDの長期安定性、編集・削除再作成後、端末・アカウント・リージョン間、note-onlyの実DOMは未確認。#31のHTML抽出改善は別issue。実ランタイムでは通常の改名・削除イベントを確認したが、電源断などの異常終了・全イベント競合の実機注入は行っていない。競合／保存前後例外は自動テストとNodeの実ファイルIO検証で確認した。
+
+PR #37/#38はdraftを維持し、mainへのmerge・原本Vaultへのプラグイン配布は行っていない。
 
 ## 統合コードの独立レビューと追補
 
@@ -61,4 +86,4 @@ PR #37/#38はいずれもdraftのまま。mainへのmergeは行っていない�
 
 別のauthor確認では、不一致の一時targetPathsを渡すだけで正常な永続指定までidentity-changedにする問題を見つけた。再現テストをRED→GREENにし、不一致はdestination-invalidで保留しつつ正常な指定を維持するよう修正。全254テスト、型チェック、buildを再実行した。
 
-独立レビューは両親PRの実装全体、実Obsidianランタイム、privateなNotebook観測／ノートhashの再現、installer更新・配布・main mergeを対象外とした。前二者は既存PRの検証と上記の追加検証で補い、実ランタイムの不足は残る制約として維持する。private検証についてはauthorが実データで実行し原本241件のhash不変を確認した。
+独立レビューは両親PRの実装全体、実Obsidianランタイム、privateなNotebook観測／ノートhashの再現、installer更新・配布・main mergeを対象外とした。前二者は既存PRの検証と上記の追加検証で補い、実ランタイムは上記の後続検証で確認した。private検証についてはauthorが実データで実行し原本241件のhash不変を確認した。
