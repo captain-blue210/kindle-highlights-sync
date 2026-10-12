@@ -14,6 +14,12 @@ import {
 	syncNoteContent,
 } from "./note-sync";
 import { renderTemplate } from "./template-renderer";
+import { uniqueAnnotations } from "./annotation-identity";
+import {
+	AnnotationSyncOptions,
+	HeldAnnotation,
+	prepareNewNoteAnnotations,
+} from "./annotation-sync";
 
 export interface NoteWriterIO {
 	list(): string[];
@@ -32,6 +38,13 @@ export interface NoteSaveOutcome {
 	status: "created" | "updated" | "held" | "failed" | "skipped-no-highlights";
 	path?: string;
 	reason?: string;
+	heldAnnotations?: HeldAnnotation[];
+}
+export interface NoteSaveOptions {
+	/** #34 supplies the chosen note. A missing/mismatched target never falls back. */
+	targetPaths?: Record<string, string>;
+	/** User-confirmed mappings belong to one destination, never the entire ASIN. */
+	annotationOptionsByPath?: Record<string, AnnotationSyncOptions>;
 }
 export function normalizeOutputDirectory(path: string): string {
 	const normalized = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
@@ -66,6 +79,7 @@ export async function saveBookNotes(
 	highlights: Highlight[],
 	onBook?: (book: Book, index: number) => void,
 	onBookSettled?: (book: Book, index: number, outcome: BookOutcome) => void,
+	options: NoteSaveOptions = {},
 ): Promise<NoteWriteResult> {
 	const output = normalizeOutputDirectory(settings.outputDirectory);
 	const paths = io
@@ -116,18 +130,36 @@ export async function saveBookNotes(
 	}
 	for (const [index, book] of books.entries()) {
 		onBook?.(book, index);
-		const bookHighlights = highlights.filter((h) => h.bookId === book.id);
+		const bookHighlights = uniqueAnnotations(
+			highlights.filter((h) => h.bookId === book.id),
+			book.asin,
+		);
 		const outcome: BookOutcome = { status: "success", issues: [] };
 		try {
-			const existing = findExistingNote(
-				notes,
-				book,
-				settings.propertyNames,
-				settings.propertyNameHistory,
-			);
+			const selectedPath = options.targetPaths?.[book.asin];
+			const selected = selectedPath
+				? notes.find((n) => n.path === selectedPath)
+				: undefined;
+			if (selectedPath !== undefined && !selected)
+				throw new Error("Selected note is unavailable");
+			if (
+				selected &&
+				safeProperties(selected.content, settings)?.asin !== book.asin
+			)
+				throw new Error("Selected note has a different ASIN");
+			const existing =
+				selected ??
+				findExistingNote(
+					notes,
+					book,
+					settings.propertyNames,
+					settings.propertyNameHistory,
+				);
 			if (existing) {
 				let added = 0,
 					warnings: string[] = [];
+				let heldAnnotations: HeldAnnotation[] = [];
+				let savedContent = existing.content;
 				await io.process(existing.path, (current) => {
 					// Read fresh properties inside the atomic process, never apply a stale snapshot.
 					const properties = readBookProperties(
@@ -137,6 +169,8 @@ export async function saveBookNotes(
 					);
 					if (
 						!properties ||
+						(selectedPath !== undefined &&
+							properties.asin !== book.asin) ||
 						(properties.asin && properties.asin !== book.asin)
 					)
 						throw new Error(
@@ -148,13 +182,17 @@ export async function saveBookNotes(
 						bookHighlights,
 						settings.propertyNames,
 						settings.propertyNameHistory,
+						options.annotationOptionsByPath?.[existing.path],
 					);
 					added = merged.added;
 					warnings = merged.warnings;
-					outcome.status = merged.content === current ? "unchanged" : "success";
-					existing.content = merged.content;
+					heldAnnotations = merged.heldAnnotations;
+					outcome.status =
+						merged.content === current ? "unchanged" : "success";
+					savedContent = merged.content;
 					return merged.content;
 				});
+				existing.content = savedContent;
 				if (warnings.length) {
 					result.held++;
 					result.outcomes.push({
@@ -162,6 +200,7 @@ export async function saveBookNotes(
 						status: "held",
 						path: existing.path,
 						reason: warnings.join("; "),
+						heldAnnotations,
 					});
 					outcome.status = "held";
 					outcome.issues = warnings.map((message) => ({
@@ -225,8 +264,40 @@ export async function saveBookNotes(
 					publisher: book.metadata?.publisher,
 					appLink: `kindle://book?action=open&asin=${encodeURIComponent(book.asin)}`,
 				});
+				const renderedParts = splitNote(rendered);
+				const prepared = prepareNewNoteAnnotations(
+					renderedParts.body,
+					bookHighlights,
+					book.asin,
+				);
+				if (prepared.warnings.length) {
+					result.held++;
+					result.outcomes.push({
+						asin: book.asin,
+						status: "held",
+						path,
+						reason: prepared.warnings.join("; "),
+						heldAnnotations: prepared.heldAnnotations,
+					});
+					outcome.status = "held";
+					outcome.issues = prepared.warnings.map((message) => ({
+						phase: "save",
+						bookTitle: book.title,
+						path,
+						message,
+					}));
+					result.errors.push(
+						`${path}: ${prepared.warnings.join("; ")}`,
+					);
+					continue;
+				}
+				const withLedger =
+					rendered.slice(
+						0,
+						rendered.length - renderedParts.body.length,
+					) + prepared.body;
 				const content = updateBookProperties(
-					rendered,
+					withLedger,
 					props,
 					settings.propertyNames,
 					settings.propertyNameHistory,

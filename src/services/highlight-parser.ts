@@ -210,6 +210,8 @@ export class HighlightParser {
 
 			highlights.push({
 				id,
+				sourceAnnotationId: container.attr("id") || undefined,
+				sourceHighlightId: colorElement.attr("id") || undefined,
 				bookId: bookAsin,
 				text,
 				color,

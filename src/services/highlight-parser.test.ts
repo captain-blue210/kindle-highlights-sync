@@ -104,6 +104,17 @@ const MOCK_HTML_NO_HIGHLIGHTS = `
 const MOCK_HTML_EMPTY = ``;
 
 describe("HighlightParser", () => {
+	it("records Amazon operation IDs separately from locally generated identities", () => {
+		const $ = cheerio.load(
+			`<div class="a-row a-spacing-base" id="annotation-123"><span class="kp-notebook-highlight" id="highlight-456"><span id="highlight">abc</span></span><input id="kp-annotation-location" value="10"></div>`,
+		);
+		const result = new HighlightParser().parseHighlightsPage($, "ABC");
+		expect(result[0]).toMatchObject({
+			sourceAnnotationId: "annotation-123",
+			sourceHighlightId: "highlight-456",
+		});
+		expect(result[0].id).toBe("highlight-ABC-loc-10");
+	});
 	let parser: HighlightParser;
 
 	beforeEach(() => {

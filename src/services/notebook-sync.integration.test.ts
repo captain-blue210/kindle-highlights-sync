@@ -23,7 +23,7 @@ it("fetches and saves an ASIN arriving after five seconds, retaining an edited n
 	(api as any).loggedIn = true;
 	(api as any).loginWindow = window;
 	const source =
-		'---\nbookId: "saved"\ntitle: Original\nASIN: ABC\n---\n\n> [[Related]] Edited abc ^ref-19495\n\nPersonal memo\n';
+		'---\nbookId: "saved"\ntitle: Original\nASIN: ABC\n---\n\n> [[Related]] Edited abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\nPersonal memo\n';
 	const files = new Map([["books/Renamed.md", source]]);
 	const io = {
 		list: () => [...files.keys()],
@@ -77,7 +77,9 @@ it("fetches and saves an ASIN arriving after five seconds, retaining an edited n
 	expect(secondSave.added).toBe(0);
 	expect(secondSave.created).toBe(0);
 	expect(files).toEqual(afterFirst);
-	expect(splitNote(files.get("books/Renamed.md")!).body).toBe(
-		splitNote(source).body,
-	);
+	expect(
+		splitNote(files.get("books/Renamed.md")!).body.startsWith(
+			splitNote(source).body,
+		),
+	).toBe(true);
 });

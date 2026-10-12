@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { saveBookNotes } from "./note-writer";
+import { annotationKey } from "./annotation-identity";
 import {
 	DEFAULT_PROPERTY_NAMES as names,
 	readBookProperties,
@@ -36,14 +37,16 @@ const config = {
 describe("persisting Kindle note updates", () => {
 	it("updates the existing renamed file with zero new highlights without replacing its body", async () => {
 		const source =
-			'---\nbookId: "saved"\ntitle: Original\nASIN: ABC\nlastAnnotated: Invalid date\n---\n\n> Edited abc ^ref-19495\n\nMemo\n';
+			'---\nbookId: "saved"\ntitle: Original\nASIN: ABC\nlastAnnotated: Invalid date\n---\n\n> Edited abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\nMemo\n';
 		const io = memoryVault({ "books/Handwritten name.md": source });
 		const result = await saveBookNotes(io, config, [book], [highlight]);
 		expect(result.updated).toBe(1);
 		expect(result.added).toBe(0);
 		expect(io.files.size).toBe(1);
 		const note = io.files.get("books/Handwritten name.md")!;
-		expect(splitNote(note).body).toBe(splitNote(source).body);
+		expect(splitNote(note).body.startsWith(splitNote(source).body)).toBe(
+			true,
+		);
 		expect(readBookProperties(note, names, [])).toMatchObject({
 			bookId: "saved",
 			lastAnnotatedDate: "2026-10-08",
@@ -58,7 +61,9 @@ describe("persisting Kindle note updates", () => {
 			(await saveBookNotes(io, config, [book], [highlight])).added,
 		).toBe(0);
 		expect(io.files.size).toBe(1);
-		expect(io.files.get("books/Renamed Book.md")).toContain("^ref-19495");
+		expect(io.files.get("books/Renamed Book.md")).toMatch(
+			/\^ks-[a-f0-9]{64}/,
+		);
 	});
 	it("does not overwrite an unrelated same-name note or create a duplicate for conflicting ASINs", async () => {
 		const io = memoryVault({
@@ -120,7 +125,7 @@ it("reports each ASIN's save outcome separately, including empty new books", asy
 
 it("retains links, old anchors, personal notes and the renamed path on two consecutive saves", async () => {
 	const source =
-		'---\nbookId: "saved"\ntitle: Original\nASIN: ABC\n---\n\n> [[Related]] Edited abc ^ref-19495\n\nPersonal memo [[Other]]\n';
+		'---\nbookId: "saved"\ntitle: Original\nASIN: ABC\n---\n\n> [[Related]] Edited abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\nPersonal memo [[Other]]\n';
 	const io = memoryVault({ "books/My renamed book.md": source });
 	const highlights = [
 		highlight,
@@ -230,14 +235,284 @@ it("retains unreadable note details even with zero fetched books", async () => {
 	expect(result.failed).toBe(0);
 });
 
-
 it("reports an identical existing note as unchanged while retaining its successful completion", async () => {
- const io=memoryVault();
- await saveBookNotes(io,config,[book],[highlight]);
- const original=io.files.get("books/Renamed Book.md");
- const outcomes:string[]=[];
- await saveBookNotes(io,config,[book],[highlight],undefined,
-  (_book,_index,outcome)=>outcomes.push(outcome.status));
- expect(io.files.get("books/Renamed Book.md")).toBe(original);
- expect(outcomes).toEqual(["unchanged"]);
+	const io = memoryVault();
+	await saveBookNotes(io, config, [book], [highlight]);
+	const original = io.files.get("books/Renamed Book.md");
+	const outcomes: string[] = [];
+	await saveBookNotes(
+		io,
+		config,
+		[book],
+		[highlight],
+		undefined,
+		(_book, _index, outcome) => outcomes.push(outcome.status),
+	);
+	expect(io.files.get("books/Renamed Book.md")).toBe(original);
+	expect(outcomes).toEqual(["unchanged"]);
+});
+
+describe("atomic annotation ledger and selected destination", () => {
+	it("does not write a selected note whose ASIN was removed after its initial scan", async () => {
+		const io = memoryVault({
+			"books/Chosen.md":
+				"---\nbookId: saved\ntitle: Old\nASIN: ABC\n---\nOld memo\n",
+		});
+		const replacement =
+			"---\nbookId: unrelated\ntitle: Different\n---\nUnrelated note\n";
+		io.process = async (path, fn) => {
+			io.files.set(path, replacement);
+			io.files.set(path, fn(replacement));
+		};
+		const result = await saveBookNotes(
+			io,
+			config,
+			[book],
+			[highlight],
+			undefined,
+			undefined,
+			{ targetPaths: { ABC: "books/Chosen.md" } },
+		);
+		expect(result.failed).toBe(1);
+		expect(io.files.get("books/Chosen.md")).toBe(replacement);
+	});
+	it("creates all unique annotations and maintains edited text on repeated saves and new additions", async () => {
+		const io = memoryVault();
+		const remote = [
+			highlight,
+			{ ...highlight, location: "20" },
+			{ ...highlight, text: "aca", location: "30" },
+			{ ...highlight, text: "bab", location: "30" },
+			{ ...highlight, text: "", note: "note one", location: "40" },
+			{ ...highlight, text: "", note: "note two", location: "40" },
+			highlight,
+		];
+		const first = await saveBookNotes(io, config, [book], remote);
+		expect(first.added).toBe(6);
+		expect(first.created).toBe(1);
+		const path = "books/Renamed Book.md";
+		const edited =
+			io.files.get(path)!.replace("> abc", "> [[Related|Edited abc]]") +
+			"\nPersonal memo [[Other]]\n";
+		io.files.delete(path);
+		io.files.set("books/My edited title.md", edited);
+		expect((await saveBookNotes(io, config, [book], remote)).added).toBe(0);
+		expect(io.files.get("books/My edited title.md")).toBe(edited);
+		const expanded = [
+			...remote,
+			{ ...highlight, text: "brand new", location: "50" },
+		];
+		expect((await saveBookNotes(io, config, [book], expanded)).added).toBe(
+			1,
+		);
+		const after = io.files.get("books/My edited title.md")!;
+		expect(after).toContain("[[Related|Edited abc]]");
+		expect(after).toContain("Personal memo [[Other]]");
+		expect((await saveBookNotes(io, config, [book], expanded)).added).toBe(
+			0,
+		);
+		expect(io.files.get("books/My edited title.md")).toBe(after);
+		expect(io.files.size).toBe(1);
+	});
+	it("returns structured holds and retries after a user binds an old anchor", async () => {
+		const source =
+			"---\nbookId: saved\nASIN: ABC\ntitle: Book\n---\n> [[Related]] Edited abc ^ref-19495\n\nMemo\n";
+		const io = memoryVault({ "books/Chosen.md": source });
+		const remote = [
+			highlight,
+			{ ...highlight, text: "new", location: "20" },
+		];
+		const held = await saveBookNotes(io, config, [book], remote);
+		expect(held.held).toBe(1);
+		expect(io.files.get("books/Chosen.md")).toBe(source);
+		expect(held.outcomes?.[0]).toMatchObject({
+			path: "books/Chosen.md",
+			heldAnnotations: [
+				{
+					sourceKey: annotationKey(highlight, "ABC"),
+					reason: "ambiguous-legacy",
+					candidates: ["ref-19495"],
+				},
+			],
+		});
+		const options = {
+			annotationOptionsByPath: {
+				"books/Chosen.md": {
+					bindings: {
+						[annotationKey(highlight, "ABC")]: "ref-19495",
+					},
+				},
+			},
+		};
+		const saved = await saveBookNotes(
+			io,
+			config,
+			[book],
+			remote,
+			undefined,
+			undefined,
+			options,
+		);
+		expect(saved.added).toBe(1);
+		expect(saved.held).toBe(0);
+		const after = io.files.get("books/Chosen.md")!;
+		expect(after).toContain("> [[Related]] Edited abc ^ref-19495");
+		expect((await saveBookNotes(io, config, [book], remote)).added).toBe(0);
+		expect(io.files.get("books/Chosen.md")).toBe(after);
+	});
+	it.each(["before", "after"])(
+		"retries a create that fails %s the atomic write without duplicates",
+		async (stage) => {
+			const io = memoryVault();
+			const create = io.create;
+			io.create = async (p, s) => {
+				if (stage === "after") await create(p, s);
+				throw Error("write failed");
+			};
+			expect(
+				(await saveBookNotes(io, config, [book], [highlight])).failed,
+			).toBe(1);
+			io.create = create;
+			const retry = await saveBookNotes(io, config, [book], [highlight]);
+			expect(retry.failed).toBe(0);
+			expect(retry.added).toBe(stage === "before" ? 1 : 0);
+			expect(io.files.size).toBe(1);
+			expect(
+				(io.files.values().next().value!.match(/\^ks-/g) ?? []).length,
+			).toBe(1);
+		},
+	);
+	it.each(["before", "after"])(
+		"retries an update that fails %s the atomic write without duplicates",
+		async (stage) => {
+			const io = memoryVault();
+			await saveBookNotes(io, config, [book], [highlight]);
+			const process = io.process;
+			io.process = async (p, fn) => {
+				if (stage === "after") await process(p, fn);
+				else fn(io.files.get(p)!);
+				throw Error("write failed");
+			};
+			const remote = [
+				highlight,
+				{ ...highlight, text: "new", location: "20" },
+			];
+			expect(
+				(await saveBookNotes(io, config, [book], remote)).failed,
+			).toBe(1);
+			io.process = process;
+			const retry = await saveBookNotes(io, config, [book], remote);
+			expect(retry.failed).toBe(0);
+			expect(retry.added).toBe(stage === "before" ? 1 : 0);
+			expect(
+				(io.files.values().next().value!.match(/\^ks-/g) ?? []).length,
+			).toBe(2);
+			expect(
+				(await saveBookNotes(io, config, [book], remote)).added,
+			).toBe(0);
+		},
+	);
+	it("reconciles only the selected note and never shares its mapping with another same-ASIN note", async () => {
+		const source =
+			"---\nbookId: saved\nASIN: ABC\ntitle: Old\n---\n> Edited ^ref-19495\n\nPersonal [[Other]]\n";
+		const io = memoryVault({
+			"books/A.md": source,
+			"books/B.md": source.replace("Edited", "Other edit"),
+		});
+		const options = {
+			targetPaths: { ABC: "books/A.md" },
+			annotationOptionsByPath: {
+				"books/A.md": {
+					bindings: {
+						[annotationKey(highlight, "ABC")]: "ref-19495",
+					},
+				},
+			},
+		};
+		const remote = [
+			highlight,
+			{ ...highlight, text: "new", location: "20" },
+		];
+		const other = io.files.get("books/B.md");
+		expect(
+			(
+				await saveBookNotes(
+					io,
+					config,
+					[book],
+					remote,
+					undefined,
+					undefined,
+					options,
+				)
+			).added,
+		).toBe(1);
+		expect(io.files.get("books/B.md")).toBe(other);
+		const a = io.files.get("books/A.md");
+		expect(
+			(
+				await saveBookNotes(
+					io,
+					config,
+					[book],
+					remote,
+					undefined,
+					undefined,
+					{ targetPaths: { ABC: "books/A.md" } },
+				)
+			).added,
+		).toBe(0);
+		expect(io.files.get("books/A.md")).toBe(a);
+		const b = await saveBookNotes(
+			io,
+			config,
+			[book],
+			remote,
+			undefined,
+			undefined,
+			{ targetPaths: { ABC: "books/B.md" } },
+		);
+		expect(b.held).toBe(1);
+		expect(io.files.get("books/B.md")).toBe(other);
+	});
+	it("does not fall back when a selected path vanished or belongs to another ASIN", async () => {
+		for (const path of ["books/Missing.md", "books/Foreign.md"]) {
+			const io = memoryVault({
+				"books/A.md":
+					"---\nbookId: saved\nASIN: ABC\ntitle: Old\n---\nMemo",
+				"books/Foreign.md":
+					"---\nbookId: foreign\nASIN: FOREIGN\ntitle: Foreign\n---\nOther",
+			});
+			const before = new Map(io.files);
+			const result = await saveBookNotes(
+				io,
+				config,
+				[book],
+				[highlight],
+				undefined,
+				undefined,
+				{ targetPaths: { ABC: path } },
+			);
+			expect(result.failed + result.held).toBe(1);
+			expect(io.files).toEqual(before);
+		}
+	});
+	it.each([
+		"# {{title}}",
+		"{{highlights}}\n{{highlights}}",
+		"```\n{{highlights}}\n```",
+	])(
+		"holds custom templates that omit or duplicate visible annotation blocks: %s",
+		async (templateContent) => {
+			const io = memoryVault();
+			const result = await saveBookNotes(
+				io,
+				{ ...config, templateContent },
+				[book],
+				[highlight],
+			);
+			expect(result.held).toBe(1);
+			expect(io.files.size).toBe(0);
+		},
+	);
 });
