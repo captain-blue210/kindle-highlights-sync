@@ -1,3 +1,7 @@
+import {
+	AnnotationCounts,
+	countAnnotations,
+} from "./services/annotation-identity";
 import { NoteDestinationModal } from "./modals/NoteDestinationModal";
 import {
 	NoteDestination,
@@ -479,9 +483,11 @@ export default class KindleHighlightsPlugin extends Plugin {
 		const settings: KindleHighlightsSettings = JSON.parse(
 			JSON.stringify(this.settings),
 		);
-        // Vault events can invalidate destinations while fetching or saving.
-        settings.noteDestinations=this.settings.noteDestinations;
-        const destinationsBeforeSave=JSON.stringify(settings.noteDestinations);
+		// Vault events can invalidate destinations while fetching or saving.
+		settings.noteDestinations = this.settings.noteDestinations;
+		const destinationsBeforeSave = JSON.stringify(
+			settings.noteDestinations,
+		);
 		const diagnostics: NonNullable<
 			KindleHighlightsPlugin["lastSyncDiagnostics"]
 		> = {
@@ -507,11 +513,20 @@ export default class KindleHighlightsPlugin extends Plugin {
 			exclusions = rows.filter((row) => row.reason !== "duplicate-asin");
 			excludedCount = exclusions.length;
 			for (const _row of exclusions)
-				tracker.addIssue({ phase: "fetch", message: "Notebook library row excluded" });
+				tracker.addIssue({
+					phase: "fetch",
+					message: "Notebook library row excluded",
+				});
 		};
 		emitter.on(
 			"fetch:booklist:end",
-			({ totalBooks: total, excludedRows = [] }: { totalBooks: number; excludedRows?: FetchDiagnostics["excludedRows"] }) => {
+			({
+				totalBooks: total,
+				excludedRows = [],
+			}: {
+				totalBooks: number;
+				excludedRows?: FetchDiagnostics["excludedRows"];
+			}) => {
 				totalBooks = total;
 				trackExclusions(excludedRows);
 				tracker.startPhase("fetch", total);
@@ -539,6 +554,9 @@ export default class KindleHighlightsPlugin extends Plugin {
 				tracker.settleBook(event.bookId, event.status, event.bookTitle);
 				fetchFailed = tracker.state.counts.failed;
 			},
+		);
+		emitter.on("fetch:annotation-counts", (counts: AnnotationCounts) =>
+			tracker.setAnnotationCounts("fetched", counts),
 		);
 		const overallCounts = (): BookCounts => {
 			const saving = phase === "save" || phase === "session";
@@ -579,7 +597,10 @@ export default class KindleHighlightsPlugin extends Plugin {
 				);
 			fetchFailed = failedBooks;
 			totalBooks ??= books.length + failedBooks;
-			trackExclusions(this.kindleApiService.lastFetchDiagnostics?.excludedRows ?? exclusions);
+			trackExclusions(
+				this.kindleApiService.lastFetchDiagnostics?.excludedRows ??
+					exclusions,
+			);
 			if (this.disposed) return;
 			if (settings.downloadMetadata) {
 				phase = "metadata";
@@ -595,6 +616,10 @@ export default class KindleHighlightsPlugin extends Plugin {
 					if (this.disposed) return;
 				}
 			}
+			tracker.setAnnotationCounts(
+				"fetched",
+				countAnnotations(highlights),
+			);
 			phase = "save";
 			tracker.startPhase("save", books.length);
 			const result = await saveBookNotes(
@@ -605,14 +630,24 @@ export default class KindleHighlightsPlugin extends Plugin {
 				(book) => tracker.startBook(book.title),
 				(book, index, outcome) => {
 					for (const issue of outcome.issues) tracker.addIssue(issue);
-					tracker.settleBook(String(index), outcome.status, book.title);
+					tracker.settleBook(
+						String(index),
+						outcome.status,
+						book.title,
+					);
 				},
+			);
+			tracker.setAnnotationCounts(
+				"added",
+				result.addedCounts ?? countAnnotations([]),
 			);
 			diagnostics.noteSave = JSON.parse(JSON.stringify(result));
 			if (JSON.stringify(settings.noteDestinations) !== destinationsBeforeSave)
 				await this.saveSettings();
 			for (const row of exclusions) {
-				result.errors.push(`Notebook row ${row.row}${row.asin ? ` (ASIN: ${row.asin})` : ""}: ${row.reason}`);
+				result.errors.push(
+					`Notebook row ${row.row}${row.asin ? ` (ASIN: ${row.asin})` : ""}: ${row.reason}`,
+				);
 			}
 			for (const issue of result.issues ?? []) tracker.addIssue(issue);
 			finalCounts = overallCounts();
@@ -633,7 +668,9 @@ export default class KindleHighlightsPlugin extends Plugin {
 					held: result.held,
 					created: result.created,
 					updated: result.updated,
-					added: result.added,
+					added: result.addedCounts?.highlights ?? result.added,
+					standaloneNotes: result.addedCounts?.standaloneNotes ?? 0,
+					attachedNotes: result.addedCounts?.attachedNotes ?? 0,
 				}),
 			);
 		} catch (error) {
@@ -652,14 +689,30 @@ export default class KindleHighlightsPlugin extends Plugin {
 						: "failed",
 				finalCounts ?? overallCounts(),
 			);
-			const state = fetchStarted ? this.kindleApiService.lastFetchDiagnostics?.library.status : undefined;
-			new Notice(t(state === "unconfirmed" ? "sync.libraryUnconfirmed" : state === "load-failed" ? "sync.libraryLoadFailed" : "sync.safeFailure"));
+			const state = fetchStarted
+				? this.kindleApiService.lastFetchDiagnostics?.library.status
+				: undefined;
+			new Notice(
+				t(
+					state === "unconfirmed"
+						? "sync.libraryUnconfirmed"
+						: state === "load-failed"
+							? "sync.libraryLoadFailed"
+							: "sync.safeFailure",
+				),
+			);
 		} finally {
 			try { releaseBackgroundExecution?.(); }
 			catch {
 				diagnostics.status = "failed";
-				console.error("Kindle background timer setting could not be restored");
-				tracker.addIssue({ phase: "session", message: "Desktop background timer setting could not be restored" });
+				console.error(
+					"Kindle background timer setting could not be restored",
+				);
+				tracker.addIssue({
+					phase: "session",
+					message:
+						"Desktop background timer setting could not be restored",
+				});
 				tracker.finish("failed", finalCounts ?? overallCounts());
 				new Notice(t("sync.safeFailure"));
 			}

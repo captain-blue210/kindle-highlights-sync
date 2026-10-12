@@ -25,8 +25,8 @@
     "unknownError": "不明なエラー",
     "fileProcessingError": "ファイル処理エラー: {{filePath}}。ファイルオブジェクトが見つかりません。",
     "busy": "別のKindle処理が実行中です。",
-    "partial": "同期で失敗 {{failed}} 件、確認が必要なノート {{held}} 件がありました。",
-    "summary": "同期完了: 新規 {{created}} 件、更新 {{updated}} 件、追加ハイライト {{added}} 件。",
+    "partial": "同期で失敗 {{failed}} 件、確認が必要なノート {{held}} 件がありました。 追加: ハイライト {{added}} 件、メモだけ {{standaloneNotes}} 件、添付メモ {{attachedNotes}} 件。",
+    "summary": "同期完了: 新規 {{created}} 件、更新 {{updated}} 件、追加ハイライト {{added}} 件。 メモだけ {{standaloneNotes}} 件、添付メモ {{attachedNotes}} 件を追加。",
     "safeFailure": "同期を完了できませんでした。認証・取得に失敗した書籍のノートは変更していません。",
     "libraryUnconfirmed": "書籍一覧の取得範囲を確認できませんでした。ノートは変更せず、取得状況を診断記録に残しました。",
     "libraryLoadFailed": "書籍一覧の追加読み込みに失敗しました。ノートは変更せず、取得状況を診断記録に残しました。",
@@ -211,7 +211,9 @@
         "failed": "失敗",
         "held": "確認待ち"
       }
-    }
+    },
+    "annotationsFetched": "取得: ハイライト {{highlights}} 件、メモだけ {{standaloneNotes}} 件、添付メモ {{attachedNotes}} 件。",
+    "annotationsAdded": "追加: ハイライト {{highlights}} 件、メモだけ {{standaloneNotes}} 件、添付メモ {{attachedNotes}} 件。"
   },
   "diagnostics": {
     "title": "直近のエラー",
@@ -228,15 +230,15 @@
     "clearFailed": "エラー記録を消去できませんでした。"
   },
   "destinations": {
-  "title": "重複ASINの同期先",
-  "description": "同じASINを持つノートが複数ある場合、同期先を一つ指定してください。未指定・削除・名前変更・ASIN変更時は保留し、再選択を求めます。選ばなかったノートは変更しません。",
-  "empty": "重複ノートや保存済みの指定先はありません。",
-  "selected": "現在の指定先: {{path}}",
-  "reselect": "指定先が無効になっています。候補を確認して再選択してください。",
-  "choose": "同期先を選ぶ",
-  "unselected": "未指定（保留）",
-  "save": "指定先を保存",
-  "saved": "保存しました。同期コマンドで再同期してください。",
-  "failed": "同期先の確認または保存に失敗しました。画面を開き直して再試行してください。"
-}
+    "title": "重複ASINの同期先",
+    "description": "同じASINを持つノートが複数ある場合、同期先を一つ指定してください。未指定・削除・名前変更・ASIN変更時は保留し、再選択を求めます。選ばなかったノートは変更しません。",
+    "empty": "重複ノートや保存済みの指定先はありません。",
+    "selected": "現在の指定先: {{path}}",
+    "reselect": "指定先が無効になっています。候補を確認して再選択してください。",
+    "choose": "同期先を選ぶ",
+    "unselected": "未指定（保留）",
+    "save": "指定先を保存",
+    "saved": "保存しました。同期コマンドで再同期してください。",
+    "failed": "同期先の確認または保存に失敗しました。画面を開き直して再試行してください。"
+  }
 }

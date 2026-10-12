@@ -25,8 +25,8 @@
     "unknownError": "Unknown error",
     "fileProcessingError": "Error processing file: {{filePath}}. File object not found.",
     "busy": "Another Kindle operation is running.",
-    "partial": "Sync: {{failed}} failures and {{held}} notes held for review.",
-    "summary": "Sync complete: {{created}} created, {{updated}} updated, {{added}} highlights added.",
+    "partial": "Sync: {{failed}} failures and {{held}} notes held for review. Added {{added}} highlights, {{standaloneNotes}} standalone notes and {{attachedNotes}} attached notes.",
+    "summary": "Sync complete: {{created}} created, {{updated}} updated, {{added}} highlights added. Added {{standaloneNotes}} standalone notes and {{attachedNotes}} attached notes.",
     "safeFailure": "Sync could not be completed. Notes for books with authentication or fetch failures were not changed.",
     "libraryUnconfirmed": "Could not confirm the complete library range. Notes were not changed; the observed range is in the diagnostics report.",
     "libraryLoadFailed": "Loading additional library pages failed. Notes were not changed; the observed range is in the diagnostics report.",
@@ -211,7 +211,9 @@
         "failed": "Failed",
         "held": "Needs review"
       }
-    }
+    },
+    "annotationsFetched": "Fetched: {{highlights}} highlights, {{standaloneNotes}} standalone notes, {{attachedNotes}} attached notes.",
+    "annotationsAdded": "Added: {{highlights}} highlights, {{standaloneNotes}} standalone notes, {{attachedNotes}} attached notes."
   },
   "diagnostics": {
     "title": "Last error",
@@ -228,15 +230,15 @@
     "clearFailed": "Could not clear the error record."
   },
   "destinations": {
-  "title": "Duplicate ASIN sync destinations",
-  "description": "Choose one destination for books with multiple notes sharing an ASIN. Unselected, deleted, renamed or changed destinations are held until you select again. Other notes stay unchanged.",
-  "empty": "No duplicate notes or saved destinations.",
-  "selected": "Current destination: {{path}}",
-  "reselect": "The destination is invalid. Review the candidates and select again.",
-  "choose": "Choose sync destination",
-  "unselected": "Unselected (held)",
-  "save": "Save destination",
-  "saved": "Saved. Run the sync command again.",
-  "failed": "Could not verify or save the destination. Reopen this dialog and try again."
-}
+    "title": "Duplicate ASIN sync destinations",
+    "description": "Choose one destination for books with multiple notes sharing an ASIN. Unselected, deleted, renamed or changed destinations are held until you select again. Other notes stay unchanged.",
+    "empty": "No duplicate notes or saved destinations.",
+    "selected": "Current destination: {{path}}",
+    "reselect": "The destination is invalid. Review the candidates and select again.",
+    "choose": "Choose sync destination",
+    "unselected": "Unselected (held)",
+    "save": "Save destination",
+    "saved": "Saved. Run the sync command again.",
+    "failed": "Could not verify or save the destination. Reopen this dialog and try again."
+  }
 }

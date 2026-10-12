@@ -35,3 +35,11 @@ Settings retain the latest problematic sync, connection or logout operation with
 同じASINのノートが複数ある書籍は、同期先を指定するまで保留します。設定の「重複ASINの同期先」または同名のコマンドを開き、表示された候補パスから一つ選んで「指定先を保存」を押し、同期を再実行してください。選ばなかったノートは本文・プロパティとも変更しません。
 
 指定先はプラグイン設定に保存します。名前変更・削除・ASIN変更・ファイルの差し替えを検出した場合は指定を無効化し、再選択を求めます。名前変更を自動追従せず、残った別ノートへ自動で切り替えることもありません。指定先を元のパスへ戻しても、明示的に選び直してください。
+
+## Kindle memos
+
+Synchronization imports memos embedded in an annotation row or its related sibling row, including standalone notes without highlight text. Memo paragraphs, line breaks and external links are converted to Markdown. Attached memos are saved as separate blocks, including missing memos on previously imported highlights; existing highlights and personal notes are never regenerated or replaced.
+
+Fetched and added counts distinguish highlights, standalone notes and attached memos. The `highlights` property and `highlightsCount` template variable count highlights only. The existing `highlights` template variable renders all annotation blocks; `standaloneNotesCount` and `attachedNotesCount` are also available.
+
+Ambiguous legacy memos, personal paragraphs matching a source memo, and potentially edited source memos are held for correspondence review. A new memo can be appended when the previously saved source is still present. Existing block references and filenames remain unchanged, and repeated synchronization does not append the same source twice.

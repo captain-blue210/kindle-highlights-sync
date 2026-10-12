@@ -3,6 +3,31 @@ import type { Book, Highlight } from "../models";
 import { parseAuthor, parseToDateString } from "./kindle-api"; // Import helpers from kindle-api
 
 // --- CSS Selectors --- (Moved from kindle-api.ts)
+/** Notebook memos contain HTML; retain their paragraph, line and link structure. */
+export function memoMarkdown(
+	$: cheerio.Root,
+	element: cheerio.Element,
+): string {
+	const escape = (text: string) => text.replace(/([\\`*_[\]<>])/g, "\\$1");
+	const visit = (node: any): string => {
+		if (node.type === "text") return escape(node.data ?? "");
+		if (["script", "style"].includes(node.name)) return "";
+		if (node.name === "br") return "\n";
+		const text = (node.children ?? []).map(visit).join("");
+		if (node.name === "a") {
+			const href = $(node).attr("href") ?? "";
+			if (/^(https?:|mailto:|kindle:)/i.test(href))
+				return `[${text || escape(href)}](${href.replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29")})`;
+		}
+		if (["p", "div"].includes(node.name)) return `\n\n${text}\n\n`;
+		return text;
+	};
+	return visit(element)
+		.replace(/\r\n/g, "\n")
+		.replace(/[ \t]+\n/g, "\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
 const BOOK_SELECTOR = ".kp-notebook-library-each-book"; // Main container for each book
 const BOOK_TITLE_SELECTOR = "h2.kp-notebook-metadata"; // Corrected selector based on test HTML
 const BOOK_AUTHOR_SELECTOR = "p.kp-notebook-metadata"; // Corrected selector based on test HTML
@@ -147,20 +172,53 @@ export class HighlightParser {
 	public parseHighlightsPage($: cheerio.Root, bookAsin: string): Highlight[] {
 		const highlightsEl = $(HIGHLIGHT_CONTAINER_SELECTOR).toArray();
 		const highlights: Highlight[] = [];
+		const consumedNotes = new Set<cheerio.Element>();
 
 		highlightsEl.forEach((highlightContainerEl: cheerio.Element) => {
 			const container = $(highlightContainerEl);
+			if (consumedNotes.has(highlightContainerEl) || container.parents(HIGHLIGHT_CONTAINER_SELECTOR).toArray().some(el => consumedNotes.has(el))) return;
+			// Nested layout rows belong to their closest annotation row.
+			const owned = (selector: string) =>
+				container
+					.find(selector)
+					.filter(
+						(_i, el) =>
+							$(el).closest(HIGHLIGHT_CONTAINER_SELECTOR)[0] ===
+							highlightContainerEl,
+					);
 
 			// Find elements within the current container
-			const textElement = container.find(HIGHLIGHT_TEXT_SELECTOR);
-			const locationElement = container.find(HIGHLIGHT_LOCATION_SELECTOR);
+			const textElement = owned(HIGHLIGHT_TEXT_SELECTOR);
+			const locationElement = owned(HIGHLIGHT_LOCATION_SELECTOR);
 			const colorElement = container.find(HIGHLIGHT_COLOR_SELECTOR); // Find the span with the color class
 
-			const text = textElement.text()?.trim();
-			if (!text) {
-				// Skip if no highlight text found - this container might be just a note or empty
-				return;
+			const text = textElement.text()?.trim() || "";
+			const notes = owned(HIGHLIGHT_NOTE_SELECTOR)
+				.toArray()
+				.map((el) => memoMarkdown($, el))
+				.filter(Boolean);
+			const sibling = container.next(".kp-notebook-note");
+			const siblingLocation = sibling
+				.find(HIGHLIGHT_LOCATION_SELECTOR)
+				.val();
+			const ownLocation = locationElement.val();
+			if (
+				text &&
+				sibling.length &&
+				(!siblingLocation ||
+					(ownLocation && siblingLocation === ownLocation))
+			) {
+				notes.push(
+					...sibling
+						.find(HIGHLIGHT_NOTE_SELECTOR)
+						.toArray()
+						.map((el) => memoMarkdown($, el))
+						.filter(Boolean),
+				);
+				consumedNotes.add(sibling[0]);
 			}
+			const distinctNotes = [...new Set(notes)];
+			if (!text && !distinctNotes.length) return;
 
 			// Location is stored in a hidden input's value attribute
 			const locationValue = locationElement.val() as string;
@@ -192,15 +250,11 @@ export class HighlightParser {
 
 			const highlightClasses = colorElement.attr("class");
 			const color = mapTextToColor(highlightClasses);
-			// Find the associated note, which is usually the next sibling element
-			const noteElement = container.next(".kp-notebook-note"); // Look for the note sibling
-			const noteHtml = noteElement?.find(HIGHLIGHT_NOTE_SELECTOR).html(); // Find the text within the sibling
-			const note = noteHtml ? noteHtml.trim() : undefined;
 
 			// Generate ID based on ASIN and location (if available) or text snippet
 			const idSuffix = location
 				? `loc-${location}`
-				: `text-${text.substring(0, 10).replace(/\s+/g, "-")}`;
+				: `text-${(text || distinctNotes[0]).substring(0, 10).replace(/\s+/g, "-")}`;
 			const id = `highlight-${bookAsin}-${idSuffix}`;
 
 			// Generate appLink
@@ -217,7 +271,8 @@ export class HighlightParser {
 				color,
 				location: locationValue, // Store the original location string
 				page,
-				note,
+				note: distinctNotes[0],
+				...(distinctNotes.length > 1 ? { notes: distinctNotes } : {}),
 				appLink, // Add the generated app link
 			});
 		});

@@ -21,7 +21,11 @@ import {
 	syncNoteContent,
 } from "./note-sync";
 import { renderTemplate } from "./template-renderer";
-import { uniqueAnnotations } from "./annotation-identity";
+import {
+	AnnotationCounts,
+	countAnnotations,
+	uniqueAnnotations,
+} from "./annotation-identity";
 import {
 	AnnotationSyncOptions,
 	HeldAnnotation,
@@ -73,6 +77,7 @@ export interface NoteWriteResult {
 	created: number;
 	updated: number;
 	added: number;
+	addedCounts?: AnnotationCounts;
 	held: number;
 	failed: number;
 	errors: string[];
@@ -106,6 +111,7 @@ export async function saveBookNotes(
 		created: 0,
 		updated: 0,
 		added: 0,
+		addedCounts: countAnnotations([]),
 		held: 0,
 		failed: 0,
 		errors: [] as string[],
@@ -213,6 +219,7 @@ export async function saveBookNotes(
 			const existing =
 				resolution.status === "existing" ? resolution.note : undefined;
 			if (existing) {
+				let addedCounts = countAnnotations([]);
 				let added = 0,
 					warnings: string[] = [];
 				let heldAnnotations: HeldAnnotation[] = [];
@@ -286,6 +293,7 @@ export async function saveBookNotes(
 						options.annotationOptionsByPath?.[existing.path],
 					);
 					added = merged.added;
+					addedCounts = merged.addedCounts;
 					warnings = merged.warnings;
 					heldAnnotations = merged.heldAnnotations;
 					outcome.status =
@@ -321,6 +329,10 @@ export async function saveBookNotes(
 						path: existing.path,
 					});
 					result.added += added;
+					for (const key of Object.keys(
+						addedCounts,
+					) as (keyof AnnotationCounts)[])
+						result.addedCounts[key] += addedCounts[key];
 				}
 			} else {
 				if (!bookHighlights.length) {
@@ -351,14 +363,17 @@ export async function saveBookNotes(
 					throw new Error(
 						"An unrelated note already uses this filename",
 					);
-				const props = bookProperties(book, bookHighlights.length);
+				const counts = countAnnotations(bookHighlights, book.asin);
+				const props = bookProperties(book, counts.highlights);
 				const rendered = renderTemplate(settings.templateContent, {
 					book,
 					...book,
 					highlights: bookHighlights
 						.map((h) => renderHighlight(h, book.asin))
 						.join("\n\n"),
-					highlightsCount: bookHighlights.length,
+					highlightsCount: counts.highlights,
+					standaloneNotesCount: counts.standaloneNotes,
+					attachedNotesCount: counts.attachedNotes,
 					lastAnnotatedDate: props.lastAnnotatedDate,
 					authorUrl: book.metadata?.authorUrl,
 					publicationDate: book.metadata?.publicationDate,
@@ -413,6 +428,10 @@ export async function saveBookNotes(
 					path,
 				});
 				result.added += bookHighlights.length;
+				for (const key of Object.keys(
+					counts,
+				) as (keyof AnnotationCounts)[])
+					result.addedCounts[key] += counts[key];
 			}
 		} catch (error) {
 			if (

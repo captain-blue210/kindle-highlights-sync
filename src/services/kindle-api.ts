@@ -1,3 +1,8 @@
+import {
+	AnnotationCounts,
+	countAnnotations,
+	uniqueAnnotations,
+} from "./annotation-identity";
 import { safeErrorMessage } from "./sync-progress";
 import { EventEmitter } from "events"; // ★ Import EventEmitter
 import { parseAmazonDate } from "./amazon-date";
@@ -149,6 +154,7 @@ export interface FetchDiagnostics {
 	excludedRows: ExcludedBookRow[];
 	fetchedAsins: string[];
 	failedAnnotations: { asin: string; reason: "annotation-fetch-failed" }[];
+	annotationCounts?: AnnotationCounts;
 	failure?: "notebook-fetch-failed";
 }
 
@@ -290,10 +296,10 @@ export class KindleApiService {
 					`   - Parsed ${highlightsOnPage.length} highlights from page.`,
 				);
 				allHighlights.push(...highlightsOnPage);
-				totalHighlightsForBook += highlightsOnPage.length;
+				totalHighlightsForBook = countAnnotations(allHighlights,book.asin).highlights;
 
 				// Emit progress for each highlight found on the page
-				highlightsOnPage.forEach((highlight, index) => {
+				highlightsOnPage.filter(h=>h.text?.trim()).forEach((highlight, index) => {
 					emitter.emit("fetch:highlights:progress", {
 						bookTitle: book.title,
 						highlightText: highlight.text,
@@ -307,7 +313,8 @@ export class KindleApiService {
 					// ★ Emit page end
 					bookTitle: book.title,
 					url: regionUrls.notebookUrl,
-					highlightsFound: highlightsOnPage.length,
+					highlightsFound: countAnnotations(highlightsOnPage,book.asin).highlights,
+					annotationCounts: countAnnotations(highlightsOnPage,book.asin),
 				});
 
 				// This block seems duplicated from the previous change, removing it.
@@ -346,9 +353,11 @@ export class KindleApiService {
 		);
 		emitter.emit("fetch:highlights:end", {
 			bookTitle: book.title,
-			highlightCount: totalHighlightsForBook,
+			highlightCount: countAnnotations(allHighlights, book.asin)
+				.highlights,
+			annotationCounts: countAnnotations(allHighlights, book.asin),
 		}); // Emit highlight fetch end for book
-		return allHighlights;
+		return uniqueAnnotations(allHighlights, book.asin);
 	}
 
 	public async logout(region: string): Promise<void> {
@@ -499,6 +508,12 @@ export class KindleApiService {
 							emitter, // ★ Pass emitter
 						);
 					allHighlights.push(...bookHighlights);
+					diagnostics.annotationCounts =
+						countAnnotations(allHighlights);
+					emitter.emit(
+						"fetch:annotation-counts",
+						diagnostics.annotationCounts,
+					);
 					successfulBooks.push(book);
 					diagnostics.fetchedAsins.push(book.asin);
 				} catch (error) {

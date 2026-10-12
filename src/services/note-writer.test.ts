@@ -827,3 +827,28 @@ it("holds a selected file that disappears while its snapshot is being read", asy
 		status: "held",
 	});
 });
+
+it("counts highlight, standalone and attached memos separately across new and repeated saves", async () => {
+	const io = memoryVault();
+	const remote = [
+		{ ...highlight, note: "attached" },
+		{ ...highlight, text: "", note: "only one", location: "20" },
+		{ ...highlight, text: "", note: "only two", location: "20" },
+	];
+	const first = await saveBookNotes(io, config, [book], remote);
+	expect(first.added).toBe(4);
+	expect(first.addedCounts).toEqual({
+		highlights: 1,
+		standaloneNotes: 2,
+		attachedNotes: 1,
+	});
+	const content = io.files.get("books/Renamed Book.md")!;
+	expect(readBookProperties(content, names, [])?.highlightsCount).toBe(1);
+	const second = await saveBookNotes(io, config, [book], remote);
+	expect(second.addedCounts).toEqual({
+		highlights: 0,
+		standaloneNotes: 0,
+		attachedNotes: 0,
+	});
+	expect(io.files.get("books/Renamed Book.md")).toBe(content);
+});
