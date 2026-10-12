@@ -13,6 +13,17 @@ const h = (text: string, location = "10", note?: string): Highlight => ({
 });
 
 describe("source annotations independent of edited note text", () => {
+	it("retains an existing quote-only proof ledger when the user has a separate block ID", () => {
+		// Captured from the previous implementation, before quote scanning attached separate IDs.
+		const body = "> abc\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^my-custom-id\n\n<!-- kindle-sync:v1 eyJ2ZXJzaW9uIjoxLCJhc2luIjoiQUJDIiwiZW50cmllcyI6eyJzMS0wMjE1YzY0YWRkN2QxNmMxODc1ZmE4MTEyMjBlM2Q0MGY2ZWI1YzBhZTc0NmU2ZTRhNTVlYTJlYmU5YTZhYTcwIjp7InByb29mIjoiMTJhY2ZkYjJiMzM5OGZhNTFjNGVjZTlkNGRmMzdjMTA4MmRlMzhmMGUwMzM4NDJlODYwM2ViMDY5ODU4NjZiMiJ9fX0= -->\n";
+		const repeated = mergeHighlights(body, [h("abc")], "ABC");
+		expect(repeated.warnings).toEqual([]);
+		expect(repeated.body).toBe(body);
+		const added = mergeHighlights(body, [h("abc"), h("new", "20")], "ABC");
+		expect(added.warnings).toEqual([]);
+		expect(added.added).toBe(1);
+		expect(added.body).toContain("> abc\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^my-custom-id");
+	});
 	it("places a quotation block ID outside the quote before its attached note", () => {
 		const rendered = renderHighlight(h("abc\nsecond line", "10", "My note"), "ABC");
 		expect(rendered).toMatch(/> abc\n> second line\n> \[10\]\([^\n]+\)\n\n\^ks-[a-f0-9]{64}\n\nMy note$/);
