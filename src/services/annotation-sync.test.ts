@@ -22,18 +22,31 @@ describe("source annotations independent of edited note text", () => {
 		const added = mergeHighlights(body, [h("abc"), h("new", "20")], "ABC");
 		expect(added.warnings).toEqual([]);
 		expect(added.added).toBe(1);
-		expect(added.body).toContain("> abc\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^my-custom-id");
+		expect(added.body).toContain(
+			"> abc\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^my-custom-id",
+		);
 	});
 	it("places a quotation block ID outside the quote before its attached note", () => {
-		const rendered = renderHighlight(h("abc\nsecond line", "10", "My note"), "ABC");
-		expect(rendered).toMatch(/> abc\n> second line\n> \[10\]\([^\n]+\)\n\n\^ks-[a-f0-9]{64}\n\nMy note$/);
-		const prepared = prepareNewNoteAnnotations(rendered, [h("abc\nsecond line", "10", "My note")], "ABC");
+		const rendered = renderHighlight(
+			h("abc\nsecond line", "10", "My note"),
+			"ABC",
+		);
+		expect(rendered).toMatch(
+			/> abc\n> second line[\s\S]*\^ks-[a-f0-9]{64}\n\n> My note[\s\S]*\^ks-[a-f0-9]{64}$/,
+		);
+		const prepared = prepareNewNoteAnnotations(
+			rendered,
+			[h("abc\nsecond line", "10", "My note")],
+			"ABC",
+		);
 		expect(prepared.warnings).toEqual([]);
 	});
 	it("holds a template ID followed by another line in the same quotation", () => {
 		const body = `> abc ^ks-${"a".repeat(64)}\n> location\n`;
 		// Use the generated ID but place it in the position Obsidian does not index.
-		const anchor = renderHighlight(h("abc"), "ABC").match(/\^ks-[a-f0-9]{64}/)![0];
+		const anchor = renderHighlight(h("abc"), "ABC").match(
+			/\^ks-[a-f0-9]{64}/,
+		)![0];
 		const invalid = body.replace(/\^ks-[a-f0-9]{64}/, anchor);
 		const result = prepareNewNoteAnnotations(invalid, [h("abc")], "ABC");
 		expect(result.body).toBe(invalid);
@@ -327,4 +340,83 @@ describe("source annotations independent of edited note text", () => {
 			{ reason: "ambiguous-legacy", candidates: ["my-old-block"] },
 		]);
 	});
+});
+
+// #31: source memos need their own persisted target, including for an old highlight.
+describe("independent attached memo persistence", () => {
+	it("appends missing memos without changing an edited legacy highlight and repeats safely", () => {
+		const body =
+			"> [[Related|Edited abc]] ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\nPersonal memo\n";
+		const remote = [
+			h("abc", "10", "Kindle memo\n[link](https://example.com)"),
+		];
+		const first = mergeHighlights(body, remote, "ABC");
+		expect(first.warnings).toEqual([]);
+		expect(first.added).toBe(1);
+		expect(first.body.startsWith(body)).toBe(true);
+		expect(first.body).toContain(
+			"> Kindle memo\n> [link](https://example.com)",
+		);
+		expect(mergeHighlights(first.body, remote, "ABC").body).toBe(
+			first.body,
+		);
+	});
+	it("creates a highlight and each distinct attached memo once", () => {
+		const remote = [{ ...h("abc"), notes: ["one", "two", "one"] }];
+		const first = mergeHighlights("", remote, "ABC");
+		expect(first.added).toBe(3);
+		expect([...first.body.matchAll(/\^ks-[a-f0-9]{64}/g)]).toHaveLength(3);
+		expect(mergeHighlights(first.body, remote, "ABC").added).toBe(0);
+	});
+	it("holds a matching personal paragraph instead of silently adopting or duplicating it", () => {
+		const first = mergeHighlights("", [h("abc")], "ABC");
+		const body = first.body + "\nMy private memo\n";
+		const result = mergeHighlights(
+			body,
+			[h("abc", "10", "My private memo")],
+			"ABC",
+		);
+		expect(result.body).toBe(body);
+		expect(result.heldAnnotations[0]?.reason).toBe("ambiguous-legacy");
+	});
+});
+
+it("persists multiple standalone memos from the same row without merging with a same-text highlight", () => {
+	const source = { ...h("", "10", "one"), notes: ["one", "two"] };
+	const first = mergeHighlights("", [source], "ABC");
+	expect(first.added).toBe(2);
+	const second = mergeHighlights(first.body, [source, h("one")], "ABC");
+	expect(second.warnings).toEqual([]);
+	expect(second.added).toBe(1);
+	expect(mergeHighlights(second.body, [source, h("one")], "ABC").body).toBe(
+		second.body,
+	);
+});
+
+describe("reviewed memo ambiguity cases", () => {
+ it.each(['standalone','locationless attached'])('holds a changed %s memo without replacing or appending it', kind => {
+  const before = kind==='standalone' ? [h('','10','old')] : [h('abc','','old')];
+  const after = kind==='standalone' ? [h('','10','new')] : [h('abc','','new')];
+  const first = mergeHighlights('',before,'ABC');
+  const second = mergeHighlights(first.body,after,'ABC');
+  expect(second.body).toBe(first.body);
+  expect(second.added).toBe(0);
+  expect(second.heldAnnotations[0]?.reason).toBe('ambiguous-legacy');
+ });
+ it.each(['attached','standalone'])('accepts an additional %s memo when the previously saved source remains',kind=>{
+  const before = kind==='attached' ? [h('abc','10','one')] : [h('','10','one')];
+  const after = kind==='attached' ? [{...h('abc'),notes:['one','two']}] : [h('','10','one'),h('','10','two')];
+  const first = mergeHighlights('',before,'ABC');
+  const second = mergeHighlights(first.body,after,'ABC');
+  expect(second.warnings).toEqual([]);
+  expect(second.added).toBe(1);
+  expect(mergeHighlights(second.body,after,'ABC').body).toBe(second.body);
+ });
+ it('holds matching unmarked personal memos across paragraph boundaries',()=>{
+  const first = mergeHighlights('',[h('abc')],'ABC');
+  const body = first.body+'\nFirst paragraph\n\nSecond paragraph\n';
+  const result=mergeHighlights(body,[h('abc','10','First paragraph\n\nSecond paragraph')],'ABC');
+  expect(result.body).toBe(body);
+  expect(result.heldAnnotations[0]?.reason).toBe('ambiguous-legacy');
+ });
 });

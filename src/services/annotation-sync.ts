@@ -1,6 +1,8 @@
 import { Buffer } from "buffer";
 import type { Highlight } from "../models";
 import {
+	AnnotationCounts,
+	countAnnotations,
 	annotationAnchor,
 	annotationKey,
 	annotationLocation,
@@ -155,7 +157,13 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 			// Earlier inline quote IDs remain correspondence markers for legacy notes.
 			// New templates must put an ID at the end of the quote or outside it.
 			linkableAnchors: quote
-				? [...block.slice(block.lastIndexOf("\n") + 1).matchAll(/(?:^|[ \t])\^([A-Za-z0-9-]+)(?=[ \t]*$)/g)].map((m) => m[1])
+				? [
+						...block
+							.slice(block.lastIndexOf("\n") + 1)
+							.matchAll(
+								/(?:^|[ \t])\^([A-Za-z0-9-]+)(?=[ \t]*$)/g,
+							),
+					].map((m) => m[1])
 				: validAnchors,
 			// Keep prior quote-only proof digests when a separate ID is attached.
 			// Appending our own metadata changes paragraph separators, not the legacy block.
@@ -176,13 +184,23 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 	for (const block of withoutQuotes.split(/\n\s*\n|\n---+\s*\n/)) {
 		// An ID left alone after deleting its quote is not a saved target.
 		if (/^\s*\^[A-Za-z0-9-]+\s*$/.test(block)) continue;
-		if (
-			block.includes("kindle://") ||
-			/\^[A-Za-z0-9-]+(?=\s|$)/.test(block)
-		)
-			add(block, false);
+		if (block.trim()) add(block, false);
 	}
 	return blocks;
+}
+/** Unmarked paragraphs may be personal notes: require confirmation, never adopt them. */
+function containsUnmarkedMemo(visible: string, text: string): boolean {
+ const paragraphs = visible.split(/\n\s*\n/);
+ const plain = (p: string) => !!p.trim() && !/^\s*(?:>|#{1,6} |---+\s*$)/m.test(p) && !/kindle:\/\/|\^[A-Za-z0-9-]+(?=\s|$)/.test(p);
+ for (let i=0;i<paragraphs.length;i++) {
+  let accumulated = "";
+  for (let j=i;j<paragraphs.length && plain(paragraphs[j]);j++) {
+   accumulated=normalizeSourceText(accumulated+" "+paragraphs[j]);
+   if(accumulated===text) return true;
+   if(accumulated.length>=text.length) break;
+  }
+ }
+ return false;
 }
 function parseLedger(
 	body: string,
@@ -273,6 +291,7 @@ export function reconcileAnnotations(
 		return {
 			body,
 			added: 0,
+			addedCounts: countAnnotations([]),
 			warnings: ["Invalid annotation ledger; note left unchanged"],
 			heldAnnotations,
 		};
@@ -285,6 +304,7 @@ export function reconcileAnnotations(
 		return {
 			body,
 			added: 0,
+			addedCounts: countAnnotations([]),
 			warnings: ["Unclosed Markdown context; note left unchanged"],
 			heldAnnotations,
 		};
@@ -364,6 +384,34 @@ export function reconcileAnnotations(
 			bindings.has(key)
 		)
 			hold(key, "invalid-binding");
+	const highlightTargets = new Set(
+		remote
+			.filter((a) => a.text?.trim())
+			.flatMap((a) => {
+				const target = ledger.entries[annotationKey(a, asin)];
+				return [
+					annotationAnchor(a, asin),
+					...(target && "anchor" in target ? [target.anchor] : []),
+				];
+			}),
+	);
+	const memoTargets = new Set(
+		remote
+			.filter((a) => !a.text?.trim())
+			.flatMap((a) => {
+				const target = ledger.entries[annotationKey(a, asin)];
+				return [
+					annotationAnchor(a, asin),
+					...(target && "anchor" in target ? [target.anchor] : []),
+				];
+			}),
+	);
+
+ const activeTargets = new Set<LegacyBlock>();
+ const orphanedTargets = new Set<LegacyBlock>();
+ for (const [key,target] of Object.entries(ledger.entries)) {
+  for(const block of targetBlocks(target)) (keys.has(key) ? activeTargets : orphanedTargets).add(block);
+ }
 	const proposals: { key: string; block: LegacyBlock }[] = [];
 	for (const h of remote) {
 		const key = annotationKey(h, asin);
@@ -389,24 +437,34 @@ export function reconcileAnnotations(
 			missing.push(h);
 			continue;
 		}
-		const candidates = blocks.filter(
-			(b) =>
-				(b.anchors.includes(hash) &&
-					(!b.location || b.location === loc)) ||
-				(loc && b.location === loc),
-		);
+		const memo = !h.text?.trim();
+  const candidates = blocks.filter(b => memo
+   ? !activeTargets.has(b) && !b.anchors.some(a => /^ref-/.test(a) || highlightTargets.has(a)) &&
+    (b.text===text || (!!loc && b.location===loc && (!used.has(b) || orphanedTargets.has(b))) || (!loc && orphanedTargets.has(b)))
+   : !b.anchors.some(a=>memoTargets.has(a)) && ((b.anchors.includes(hash) && (!b.location || b.location===loc)) || (loc && b.location===loc))
+  );
+  const personalMemoMatches = memo && containsUnmarkedMemo(visible,text);
+
 		// A target occupied by another source is not a safe match, including source edits.
 		const safe = candidates.filter(
 			(b) =>
 				!used.has(b) &&
 				b.anchors.every((a) => anchorCounts.get(a) === 1) &&
 				(b.text === text ||
-					(b.anchors.includes(hash) && !!loc && b.location === loc)),
+					(!memo &&
+						b.anchors.includes(hash) &&
+						!!loc &&
+						b.location === loc)),
 		);
-		if (safe.length === 1 && candidates.length === 1)
+		if (
+			safe.length === 1 &&
+			candidates.length === 1 &&
+			(!memo || safe[0].anchors.length > 0)
+		)
 			proposals.push({ key, block: safe[0] });
 		else if (
 			candidates.length ||
+			personalMemoMatches ||
 			blocks.some((b) => b.unknown && !used.has(b))
 		) {
 			hold(
@@ -414,7 +472,7 @@ export function reconcileAnnotations(
 				"ambiguous-legacy",
 				candidates.length
 					? candidates.map(candidateName)
-					: blocks.filter((b) => b.unknown).map(candidateName),
+					: personalMemoMatches ? ["block:" + digest(text)] : blocks.filter((b) => b.unknown).map(candidateName),
 			);
 		} else missing.push(h);
 	}
@@ -431,6 +489,7 @@ export function reconcileAnnotations(
 		return {
 			body,
 			added: 0,
+			addedCounts: countAnnotations([]),
 			warnings: [
 				"Annotation correspondence requires confirmation; note left unchanged",
 			],
@@ -448,7 +507,13 @@ export function reconcileAnnotations(
 			};
 	}
 	if (!Object.keys(ledger.entries).length)
-		return { body, added: 0, warnings: [], heldAnnotations };
+		return {
+			body,
+			added: 0,
+			addedCounts: countAnnotations([]),
+			warnings: [],
+			heldAnnotations,
+		};
 	const encoded = `<!-- kindle-sync:v1 ${Buffer.from(JSON.stringify(ledger), "utf8").toString("base64")} -->`;
 	// Modify only our own metadata, never the existing annotation blocks.
 	merged = marker
@@ -482,6 +547,7 @@ export function reconcileAnnotations(
 		return {
 			body,
 			added: 0,
+			addedCounts: countAnnotations([]),
 			warnings: [
 				"Rendered annotation targets are not visible; note left unchanged",
 			],
@@ -490,6 +556,7 @@ export function reconcileAnnotations(
 	return {
 		body: merged,
 		added: missing.length,
+		addedCounts: countAnnotations(missing, asin),
 		warnings: [],
 		heldAnnotations,
 	};
@@ -521,6 +588,7 @@ export function prepareNewNoteAnnotations(
 		return {
 			body,
 			added: 0,
+			addedCounts: countAnnotations([]),
 			warnings: ["Template must include every annotation exactly once"],
 			heldAnnotations,
 		};

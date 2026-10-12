@@ -9,6 +9,10 @@ export interface Highlight {
 	page?: number;
 	createdAt?: Date;
 	note?: string;
+	/** Distinct Markdown memos attached to this source highlight. */
+	notes?: string[];
+	/** Present only on an independently persisted attached memo. */
+	parentAnnotationKey?: string;
 	color?: string; // Added color field
 	appLink?: string; // Add kindle:// link
 }

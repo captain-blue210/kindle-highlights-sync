@@ -1,5 +1,5 @@
 import {
-	annotationText,
+	countAnnotations,
 	uniqueAnnotations,
 	renderAnnotation,
 } from "./annotation-identity";
@@ -85,6 +85,7 @@ export function syncNoteContent(
 		return {
 			content,
 			added: 0,
+			addedCounts: merged.addedCounts,
 			warnings: merged.warnings,
 			heldAnnotations: merged.heldAnnotations,
 		};
@@ -96,14 +97,13 @@ export function syncNoteContent(
 			withBody,
 			bookProperties(
 				book,
-				uniqueAnnotations(highlights, book.asin).filter((h) =>
-					annotationText(h).trim(),
-				).length,
+				countAnnotations(highlights, book.asin).highlights,
 			),
 			names,
 			history,
 		),
 		added: merged.added,
+		addedCounts: merged.addedCounts,
 		warnings: [],
 		heldAnnotations: merged.heldAnnotations,
 	};

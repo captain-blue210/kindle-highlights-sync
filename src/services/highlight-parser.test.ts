@@ -293,7 +293,7 @@ describe("HighlightParser", () => {
 			const $ = cheerio.load(ANNOTATIONS_HTML_MISSING_ELEMENTS);
 			const result = parser.parseHighlightsPage($, "BOOK_ASIN_4");
 
-			expect(result).toHaveLength(1); // Only one actual highlight text found
+			expect(result).toHaveLength(2); // Highlight and standalone note
 
 			expect(result[0].text).toBe("Highlight with no location or color.");
 			expect(result[0].location).toBeUndefined();
@@ -315,3 +315,73 @@ describe("HighlightParser", () => {
 		// - Different note structures
 	}); // End describe('parseHighlightsPage')
 }); // End describe('HighlightParser')
+
+// #31: these cases failed because the parser only accepted nonempty highlights.
+describe("Notebook memo extraction", () => {
+	const parse = (html: string) =>
+		new HighlightParser().parseHighlightsPage(cheerio.load(html), "ABC");
+	const row = (content: string, location = "10", cls = "") =>
+		`<div class="a-row a-spacing-base ${cls}">${content}<input id="kp-annotation-location" value="${location}"></div>`;
+	it("reads same-row Markdown notes and separate standalone notes", () => {
+		const annotations = parse(
+			row(
+				'<span id="highlight">abc</span><span id="note"><p>First<br>second</p><p><a href="https://example.com/a">link</a></p></span>',
+			) +
+				row('<span id="note">standalone one</span>', "20") +
+				row('<span id="note">standalone two</span>', "20") +
+				row('<span id="note"><br> </span>', "30"),
+		);
+		expect(annotations).toHaveLength(3);
+		expect(annotations[0].note).toBe(
+			"First\nsecond\n\n[link](https://example.com/a)",
+		);
+		expect(annotations.slice(1).map((h) => h.note)).toEqual([
+			"standalone one",
+			"standalone two",
+		]);
+	});
+	it("consumes matching siblings once and retains distinct same-row and sibling notes", () => {
+		const result = parse(
+			row('<span id="highlight">abc</span><span id="note">one</span>') +
+				row('<span id="note">one</span>', "10", "kp-notebook-note") +
+				row(
+					'<span id="highlight">def</span><span id="note">two</span>',
+					"20",
+				) +
+				row('<span id="note">three</span>', "20", "kp-notebook-note"),
+		);
+		expect(result).toHaveLength(2);
+		expect(result[0].note).toBe("one");
+		expect(result[1].notes).toEqual(["two", "three"]);
+	});
+	it("never attaches a different-location sibling to the previous highlight", () => {
+		const result = parse(
+			row('<span id="highlight">abc</span>') +
+				row(
+					'<span id="note">independent</span>',
+					"20",
+					"kp-notebook-note",
+				),
+		);
+		expect(result).toHaveLength(2);
+		expect(result[0].note).toBeUndefined();
+		expect(result[1].note).toBe("independent");
+	});
+});
+
+it("keeps all distinct memos in a standalone annotation row", () => {
+	const result = new HighlightParser().parseHighlightsPage(
+		cheerio.load(
+			'<div class="a-row a-spacing-base"><span id="note">one</span><span id="note">two</span><input id="kp-annotation-location" value="10"></div>',
+		),
+		"ABC",
+	);
+	expect(result[0].notes).toEqual(["one", "two"]);
+});
+
+it('consumes the whole associated sibling subtree once',()=>{
+ const html='<div class="a-row a-spacing-base"><span id="highlight">abc</span><input id="kp-annotation-location" value="10"></div><div class="kp-notebook-note a-row a-spacing-base"><input id="kp-annotation-location" value="10"><div class="a-row a-spacing-base"><span id="note">memo</span></div></div>';
+ const result=new HighlightParser().parseHighlightsPage(cheerio.load(html),'ABC');
+ expect(result).toHaveLength(1);
+ expect(result[0].note).toBe('memo');
+});

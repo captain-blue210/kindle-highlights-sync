@@ -237,3 +237,17 @@ it("leaves failure notices to the synchronization UI", async () => {
 	).rejects.toThrow();
 	expect(Notice).not.toHaveBeenCalled();
 });
+
+it("reports mixed annotation counts consistently from page events through fetch diagnostics", async()=>{
+ const list='<div id="kp-notebook-library"><div class="kp-notebook-library-each-book" id="ABC"><h2 class="kp-notebook-searchable">Book</h2></div></div>';
+ const page='<input class="kp-notebook-content-limit-state" value=""><input class="kp-notebook-annotations-next-page-start" value=""><div class="a-row a-spacing-base"><span id="highlight">abc</span><span id="note">attached</span><input id="kp-annotation-location" value="10"></div><div class="a-row a-spacing-base"><span id="note">standalone</span><input id="kp-annotation-location" value="20"></div>';
+ vi.mocked(loadRemoteDom).mockImplementation(async url=>({dom:cheerio.load(url.includes('?')?page:list) as any,html:url.includes('?')?page:list,finalUrl:url,library:{status:'complete',snapshots:[]}}));
+ const api=new KindleApiService({} as any);(api as any).loggedIn=true;(api as any).loginWindow={isDestroyed:()=>false};
+ const emitter=new EventEmitter();let pageEnd:any,bookEnd:any;emitter.on('fetch:page:end',e=>pageEnd=e);emitter.on('fetch:highlights:end',e=>bookEnd=e);
+ const result=await api.fetchHighlights('co.jp',emitter);
+ expect(result.highlights).toHaveLength(3);
+ expect(pageEnd.highlightsFound).toBe(1);
+ expect(pageEnd.annotationCounts).toEqual({highlights:1,standaloneNotes:1,attachedNotes:1});
+ expect(bookEnd.highlightCount).toBe(1);
+ expect(api.lastFetchDiagnostics?.annotationCounts).toEqual({highlights:1,standaloneNotes:1,attachedNotes:1});
+});
