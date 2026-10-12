@@ -38,6 +38,7 @@ interface LegacyBlock {
 	location?: string;
 	anchors: string[];
 	validAnchors: string[];
+	linkableAnchors: string[];
 	proof: string;
 	unknown: boolean;
 }
@@ -151,6 +152,11 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 			location,
 			anchors,
 			validAnchors,
+			// Earlier inline quote IDs remain correspondence markers for legacy notes.
+			// New templates must put an ID at the end of the quote or outside it.
+			linkableAnchors: quote
+				? [...block.slice(block.lastIndexOf("\n") + 1).matchAll(/(?:^|[ \t])\^([A-Za-z0-9-]+)(?=[ \t]*$)/g)].map((m) => m[1])
+				: validAnchors,
 			// Appending our own metadata changes paragraph separators, not the legacy block.
 			proof: digest(block.trim()),
 			unknown:
@@ -159,10 +165,12 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 				!anchors.some((a) => /^(?:ref-\d+|ks-[a-f0-9]{64})$/.test(a)),
 		});
 	};
-	const quotePattern = /^>.*(?:\n^>.*)*/gm;
+	const quotePattern = /^>.*(?:\n^>.*)*(?:\n[ \t]*\n\^[A-Za-z0-9-]+(?=[ \t]*(?:\n|$)))?/gm;
 	for (const block of visible.match(quotePattern) ?? []) add(block, true);
 	const withoutQuotes = visible.replace(quotePattern, "");
 	for (const block of withoutQuotes.split(/\n\s*\n|\n---+\s*\n/)) {
+		// An ID left alone after deleting its quote is not a saved target.
+		if (/^\s*\^[A-Za-z0-9-]+\s*$/.test(block)) continue;
 		if (
 			block.includes("kindle://") ||
 			/\^[A-Za-z0-9-]+(?=\s|$)/.test(block)
@@ -495,7 +503,7 @@ export function prepareNewNoteAnnotations(
 	for (const h of remote) {
 		const anchor = annotationAnchor(h, asin);
 		if (
-			blocks.flatMap((b) => b.validAnchors).filter((a) => a === anchor)
+			blocks.flatMap((b) => b.linkableAnchors).filter((a) => a === anchor)
 				.length !== 1
 		)
 			heldAnnotations.push({

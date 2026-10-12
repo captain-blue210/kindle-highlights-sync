@@ -64,5 +64,5 @@ export function renderAnnotation(h: Highlight, asin: string): string {
 		.split(/\r?\n/)
 		.map((line) => `> ${line}`)
 		.join("\n");
-	return `${quoted} ^${annotationAnchor(h, asin)}\n> [${h.location || "Kindle"}](${link})${h.text?.trim() && h.note ? `\n\n${h.note}` : ""}`;
+	return `${quoted}\n> [${h.location || "Kindle"}](${link})\n\n^${annotationAnchor(h, asin)}${h.text?.trim() && h.note ? `\n\n${h.note}` : ""}`;
 }
