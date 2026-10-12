@@ -41,4 +41,4 @@
 - [x] Obtain one fresh software review before deployment; fix Important/Critical findings in one RED→GREEN pass with a green suite.
 - [x] Deploy verified artifacts and only fully resolved, approved whole-book ledgers through an atomic current-content check. Keep unrelated vault content and settings intact.
 - [x] Run actual full sync, snapshot/verify original bodies, then reload and run normal sync. Expected complete listing, zero fetch/write failures, held keys consistent with approval state and no unexpected additions/repeated IDs/ledger targets.
-- [ ] Persist private evidence, restore temporary runtime changes, write aggregate public validation, create/attach a reviewable PR and append the canonical AI journal. Keep the PR worktree for feedback.
+- [x] Persist private evidence, restore temporary runtime changes, write aggregate public validation, create/attach a reviewable PR and append the canonical AI journal. Keep the PR worktree for feedback.
