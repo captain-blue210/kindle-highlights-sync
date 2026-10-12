@@ -157,8 +157,13 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 			linkableAnchors: quote
 				? [...block.slice(block.lastIndexOf("\n") + 1).matchAll(/(?:^|[ \t])\^([A-Za-z0-9-]+)(?=[ \t]*$)/g)].map((m) => m[1])
 				: validAnchors,
+			// Keep prior quote-only proof digests when a separate ID is attached.
 			// Appending our own metadata changes paragraph separators, not the legacy block.
-			proof: digest(block.trim()),
+			proof: digest(
+				(quote
+					? block.replace(/\n[ \t]*\n\^[A-Za-z0-9-]+[ \t]*$/, "")
+					: block).trim(),
+			),
 			unknown:
 				quote &&
 				!location &&
