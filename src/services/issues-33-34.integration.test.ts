@@ -232,7 +232,7 @@ describe("Issue #33 annotation ledger through Issue #34 persisted destination", 
 		expect(v.read(v.b)).toBe(bAfter);
 		expect(v.read(v.a)).toBe(aAfter);
 	});
-	it("does not let transient target paths bypass a persisted invalidated destination", async () => {
+	it.each(["same", "different"])("does not let a %s transient target path bypass a persisted invalidated destination", async (mode) => {
 		const v = filesystemVault();
 		const selected = v.select(v.a);
 		const settings = {
@@ -251,9 +251,10 @@ describe("Issue #33 annotation ledger through Issue #34 persisted destination", 
 			remote,
 			undefined,
 			undefined,
-			{ targetPaths: { ABC: v.b } },
+			{ targetPaths: { ABC: mode === "same" ? v.a : v.b } },
 		);
 		expect(result.held).toBe(1);
+		expect(result.outcomes?.[0].reason).toBe(mode === "same" ? "destination-deleted" : "destination-invalid");
 		expect(v.read(v.a)).toBe(v.sourceA);
 		expect(v.read(v.b)).toBe(v.sourceB);
 	});

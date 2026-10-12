@@ -42,7 +42,7 @@
 
 ## 自動検証
 
-- `npm test`: 20ファイル、253テスト通過。#33・#34両suiteと、実一時ファイルを使う両issueの組合せテストを含む。
+- `npm test`: 20ファイル、254テスト通過。#33・#34両suiteと、実一時ファイルを使う両issueの組合せテストを含む。
 - `npx tsc --noEmit --skipLibCheck`: 成功。
 - `npm run build`: 成功。
 - `git diff --check`: 成功。
@@ -57,8 +57,8 @@ PR #37/#38はいずれもdraftのまま。mainへのmergeは行っていない�
 
 ## 統合コードの独立レビューと追補
 
-独立レビューは8d55663の競合解消・接続部分を確認し、Critical/Important指摘なし。reader実行で関連43テストが通過した。Minorは「一時targetPathsと無効化済み永続指定が同じパスの場合の追加回帰テストが未追加」の1件。現在の処理は正しいとコード確認されたため、追加回帰テストは後続へ保留した。
+独立レビューは8d55663の競合解消・接続部分を確認し、Critical/Important指摘なし。reader実行で関連43テストが通過した。Minorは「一時targetPathsと無効化済み永続指定が同じパスの場合の追加回帰テストが未追加」の1件。同じパス／異なるパスの両ケースを追加で実行し、無効化理由と全文保持を確認した。Minorの検証不足は解消済み。
 
-別のauthor確認では、不一致の一時targetPathsを渡すだけで正常な永続指定までidentity-changedにする問題を見つけた。再現テストをRED→GREENにし、不一致はdestination-invalidで保留しつつ正常な指定を維持するよう修正。全253テスト、型チェック、buildを再実行した。
+別のauthor確認では、不一致の一時targetPathsを渡すだけで正常な永続指定までidentity-changedにする問題を見つけた。再現テストをRED→GREENにし、不一致はdestination-invalidで保留しつつ正常な指定を維持するよう修正。全254テスト、型チェック、buildを再実行した。
 
 独立レビューは両親PRの実装全体、実Obsidianランタイム、privateなNotebook観測／ノートhashの再現、installer更新・配布・main mergeを対象外とした。前二者は既存PRの検証と上記の追加検証で補い、実ランタイムの不足は残る制約として維持する。private検証についてはauthorが実データで実行し原本241件のhash不変を確認した。
