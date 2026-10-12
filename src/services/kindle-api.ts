@@ -151,11 +151,17 @@ export interface FetchDiagnostics {
 	library: LibraryReadResult;
 	notebookAsins: string[];
 	parsedAsins: string[];
+	selectedAsins?: string[];
+	skippedAsins?: string[];
 	excludedRows: ExcludedBookRow[];
 	fetchedAsins: string[];
 	failedAnnotations: { asin: string; reason: "annotation-fetch-failed" }[];
 	annotationCounts?: AnnotationCounts;
 	failure?: "notebook-fetch-failed";
+}
+
+export interface FetchOptions {
+	selectBooks?: (books: Book[]) => Promise<Book[]>;
 }
 
 export class KindleApiService {
@@ -375,10 +381,12 @@ export class KindleApiService {
 	public async fetchHighlights(
 		region: string,
 		emitter: EventEmitter, // Add emitter parameter
+		options: FetchOptions = {},
 	): Promise<{
 		books: Book[];
 		highlights: Highlight[];
 		failedBooks: number;
+		skippedBooks?: number;
 	}> {
 		const diagnostics: FetchDiagnostics = {
 			region,
@@ -386,6 +394,8 @@ export class KindleApiService {
 			library: { status: "unconfirmed", snapshots: [] },
 			notebookAsins: [],
 			parsedAsins: [],
+			selectedAsins: [],
+			skippedAsins: [],
 			excludedRows: [],
 			fetchedAsins: [],
 			failedAnnotations: [],
@@ -461,9 +471,9 @@ export class KindleApiService {
 				notebookDom,
 				region,
 			);
-			const books = parsed.books;
+			const allParsedBooks = parsed.books;
 			diagnostics.notebookAsins = parsed.notebookAsins;
-			diagnostics.parsedAsins = books.map((book) => book.asin);
+			diagnostics.parsedAsins = allParsedBooks.map((book) => book.asin);
 			diagnostics.excludedRows = parsed.excludedRows;
 			if (diagnostics.library.status !== "complete")
 				throw new Error(
@@ -472,25 +482,38 @@ export class KindleApiService {
 						: "Notebook library range unconfirmed",
 				);
 
+			const books = options.selectBooks
+				? await options.selectBooks(allParsedBooks)
+				: allParsedBooks;
+			diagnostics.selectedAsins = books.map((book) => book.asin);
+			const selectedAsins = new Set(diagnostics.selectedAsins);
+			diagnostics.skippedAsins = allParsedBooks
+				.filter((book) => !selectedAsins.has(book.asin))
+				.map((book) => book.asin);
+			const skippedBooks = diagnostics.skippedAsins.length;
+
 			// Emit progress after parsing all books
 			// We can't easily emit per-book progress without changing the parser significantly
 			emitter.emit("fetch:booklist:end", {
-				totalBooks: books.length,
+				totalBooks: allParsedBooks.length,
+				selectedBooks: books.length,
+				skippedBooks,
 				excludedRows: parsed.excludedRows,
 			});
 
-			console.log(`KindleApiService: Parsed ${books.length} books.`);
+			console.log(`KindleApiService: Parsed ${allParsedBooks.length} books.`);
 			if (books.length === 0) {
-				console.warn(
-					"KindleApiService: No books parsed from the notebook page.",
-				);
+				if (allParsedBooks.length === 0)
+					console.warn(
+						"KindleApiService: No books parsed from the notebook page.",
+					);
 				emitter.emit("fetch:end"); // Emit fetch end early
-				return { books: [], highlights: [], failedBooks: 0 }; // Return early
+				return { books: [], highlights: [], failedBooks: 0, skippedBooks };
 			}
 
 			const successfulBooks: Book[] = [];
 
-			// 3. Scrape Highlights for each parsed book (Paginated)
+			// 3. Scrape Highlights for each selected book (Paginated)
 			console.log(
 				"KindleApiService: Starting paginated highlight scraping...",
 			);
@@ -546,12 +569,13 @@ export class KindleApiService {
 			);
 			emitter.emit("fetch:end"); // Emit fetch end
 
-			// Return the original full book list but only highlights for the processed (limited) books
+			// Return selected books whose annotation fetch completed successfully.
 			return {
 				books: successfulBooks,
 				highlights: allHighlights,
 				failedBooks: books.length - successfulBooks.length,
-			}; // Return original 'books' list
+				skippedBooks,
+			};
 		} catch (error) {
 			if (!libraryRead) diagnostics.library.status = "load-failed";
 			diagnostics.failure = "notebook-fetch-failed";

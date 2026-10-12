@@ -49,6 +49,8 @@ import { fetchBookMetadata } from "./services/metadata-service";
 import { saveBookNotes } from "./services/note-writer";
 import { createVaultIO } from "./services/vault-io";
 import { DEFAULT_PROPERTY_NAMES } from "./services/note-properties";
+import { readBookSyncState, selectBooksForSync, type BookSyncState } from "./services/book-sync-state";
+import type { Book } from "./models";
 function plugin() {
 	const p = new Plugin({} as any, {} as any);
 	const files = new Map<string, string>();
@@ -76,6 +78,7 @@ function plugin() {
 		propertyNameHistory: [],
 		amazonSessionSecrets: {},
 		noteDestinations: {},
+		bookSyncState: {},
 	};
 	p.kindleApiService = {
 		login: vi.fn(async () => true),
@@ -103,6 +106,139 @@ beforeEach(() => {
 	} };
 	vi.stubGlobal("window", {
 		require: () => ({ remote: { getCurrentWindow: () => host } }),
+	});
+});
+
+describe("incremental sync completion transactions", () => {
+	const oldBook: Book = { id: "OLD", asin: "OLD", title: "Old book", lastAnnotatedDate: new Date("2026-10-01T00:00:00Z") };
+	const checkpoint = () => ({ "co.jp": { lastSyncDay: "2026-10-12", books: { OLD: { annotationDay: "2026-10-01", fetch: "complete" as const, save: "complete" as const, outputDirectory: "books" } } } });
+	const context = { region: "co.jp", outputDirectory: "books", syncDay: "2026-10-12", noteDestinations: {} };
+	function fetching(p: Plugin, listed: Book[], failed: string[] = [], beforeAnnotations?: () => void) {
+		vi.mocked(p.kindleApiService.fetchHighlights).mockImplementation(async (_region, emitter, options) => {
+			const selected = options?.selectBooks ? await options.selectBooks(listed) : listed;
+			beforeAnnotations?.();
+			emitter.emit("fetch:booklist:end", { totalBooks: listed.length, selectedBooks: selected.length, skippedBooks: listed.length - selected.length });
+			const books = selected.filter(b => !failed.includes(b.asin));
+			for (const b of selected) emitter.emit("fetch:book:settled", { bookId: b.asin, bookTitle: b.title, status: failed.includes(b.asin) ? "failed" : "success" });
+			(p.kindleApiService as any).lastFetchDiagnostics = { library: { status: "complete", snapshots: [] }, failedAnnotations: failed.map(asin => ({ asin })), excludedRows: [] };
+			return { books, highlights: [], failedBooks: selected.length - books.length, skippedBooks: listed.length - selected.length };
+		});
+	}
+	function saving(statuses: Record<string, "updated" | "held" | "failed"> = {}) {
+		vi.mocked(saveBookNotes).mockImplementation(async (_io, _settings, books, _hs, onBook, onSettled) => {
+			const outcomes = books.map(b => ({ asin: b.asin, status: statuses[b.asin] ?? "updated" as const }));
+			for (const [i, b] of books.entries()) {
+				onBook?.(b, i);
+				onSettled?.(b, i, { status: statuses[b.asin] === "held" ? "held" : statuses[b.asin] === "failed" ? "failed" : "success", issues: [] });
+			}
+			return { created: 0, updated: outcomes.filter(o => o.status === "updated").length, added: 0, held: outcomes.filter(o => o.status === "held").length, failed: outcomes.filter(o => o.status === "failed").length, errors: [], outcomes };
+		});
+	}
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.mocked(saveBookNotes).mockImplementation(async () => ({ created: 0, updated: 1, added: 0, held: 0, failed: 0, errors: [] }));
+	});
+	it("persists pending before fetching and counts skipped books as unchanged", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-12T12:00:00Z"));
+		const p = plugin();
+		p.settings.bookSyncState = checkpoint();
+		const newBook = { ...oldBook, id: "NEW", asin: "NEW" };
+		let disk: any;
+		p.saveData = async data => { disk = JSON.parse(JSON.stringify(data)); };
+		fetching(p, [oldBook, newBook], [], () => {
+			expect(disk.bookSyncState["co.jp"].books.NEW).toMatchObject({ fetch: "pending", save: "pending" });
+		});
+		saving();
+		vi.mocked(saveBookNotes).mockImplementationOnce(async (_io, _settings, books, _hs, _start, settled) => {
+			expect(disk.bookSyncState["co.jp"].books.NEW).toMatchObject({ fetch: "complete", save: "pending" });
+			expect(books.map(b => b.asin)).toEqual(["NEW"]);
+			settled?.(newBook, 0, { status: "success", issues: [] });
+			return { created: 1, updated: 0, added: 1, held: 0, failed: 0, errors: [], outcomes: [{ asin: "NEW", status: "created" }] };
+		});
+		await p.syncHighlights();
+		expect(disk.bookSyncState["co.jp"].books.NEW).toMatchObject({ fetch: "complete", save: "complete" });
+		expect(p.syncProgress?.state.counts).toEqual({ total: 2, completed: 2, failed: 0, held: 0 });
+	});
+	it("manual full sync fetches old completed books", async () => {
+		const p = plugin();
+		p.settings.bookSyncState = checkpoint();
+		fetching(p, [oldBook]);
+		saving();
+		await p.syncHighlights({ fullSync: true });
+		expect(p.lastSyncResult?.updated).toBe(1);
+		expect(p.settings.bookSyncState["co.jp"].books.OLD).toMatchObject({ fetch: "complete", save: "complete" });
+	});
+	it("reloaded fetch failures, failed saves and held saves remain eligible", async () => {
+		const p = plugin();
+		const books = ["FETCH_FAILED", "SAVE_FAILED", "HELD", "SAVED"].map(asin => ({ ...oldBook, asin, id: asin }));
+		let disk: any;
+		p.saveData = async data => { disk = JSON.parse(JSON.stringify(data)); };
+		fetching(p, books, ["FETCH_FAILED"]);
+		saving({ SAVE_FAILED: "failed", HELD: "held" });
+		await p.syncHighlights();
+		expect(disk.bookSyncState["co.jp"].books.FETCH_FAILED.fetch).toBe("failed");
+		expect(disk.bookSyncState["co.jp"].books.SAVE_FAILED.save).toBe("failed");
+		expect(disk.bookSyncState["co.jp"].books.HELD.save).toBe("held");
+		const reloaded = plugin();
+		reloaded.loadData = async () => disk;
+		await reloaded.loadSettings();
+		expect(selectBooksForSync(books, reloaded.settings.bookSyncState, context).map(b => b.asin)).toEqual(["FETCH_FAILED", "SAVE_FAILED", "HELD"]);
+	});
+	it("leaves a same-date refetch pending after metadata aborts", async () => {
+		const p = plugin();
+		const recent = { ...oldBook, lastAnnotatedDate: new Date("2026-10-11T00:00:00Z") };
+		p.settings.bookSyncState = checkpoint();
+		p.settings.bookSyncState["co.jp"].books.OLD.annotationDay = "2026-10-11";
+		p.settings.downloadMetadata = true;
+		fetching(p, [recent]);
+		vi.mocked(fetchBookMetadata).mockRejectedValueOnce(Error("Notebook navigation failed"));
+		await p.syncHighlights();
+		expect(p.settings.bookSyncState["co.jp"].books.OLD).toMatchObject({ fetch: "complete", save: "pending" });
+		expect(selectBooksForSync([recent], readBookSyncState(p.settings.bookSyncState), { ...context, syncDay: "2026-10-20" })).toEqual([recent]);
+	});
+	it("does not fetch or save when the pending checkpoint cannot be persisted", async () => {
+		const p = plugin();
+		let annotationFetchStarted = false;
+		p.saveData = async () => { throw Error("disk unavailable"); };
+		vi.mocked(p.kindleApiService.fetchHighlights).mockImplementation(async (_region, _emitter, options) => {
+			await options?.selectBooks?.([oldBook]);
+			annotationFetchStarted = true;
+			return { books: [oldBook], highlights: [], failedBooks: 0 };
+		});
+		await p.syncHighlights();
+		expect(annotationFetchStarted).toBe(false);
+		expect(p.settings.bookSyncState).toEqual({});
+		expect(p.syncProgress?.state.status).toBe("failed");
+	});
+	it("does not commit completion in memory or a later error save when persistence fails", async () => {
+		const p = plugin();
+		let disk: any;
+		p.saveData = async data => {
+			if (data.bookSyncState?.["co.jp"]?.books?.OLD?.save === "complete") throw Error("ENOSPC");
+			disk = JSON.parse(JSON.stringify(data));
+		};
+		fetching(p, [oldBook]); saving();
+		await p.syncHighlights();
+		expect(disk.bookSyncState["co.jp"].books.OLD.save).toBe("pending");
+		expect(p.settings.bookSyncState["co.jp"].books.OLD.save).toBe("pending");
+		expect(p.syncProgress?.state.status).toBe("partial");
+	});
+	it("refreshes stale queued settings snapshots with committed book completion", async () => {
+		const p = plugin();
+		let finish!: () => void, disk: any, first = true;
+		p.saveData = async data => {
+			if (first) { first = false; await new Promise<void>(resolve => { finish = resolve; }); }
+			disk = JSON.parse(JSON.stringify(data));
+		};
+		const next: BookSyncState = checkpoint();
+		const completion = p.saveSettings(undefined, next);
+		await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+		const ordinary = p.saveSettings();
+		finish();
+		await Promise.all([completion, ordinary]);
+		expect(disk.bookSyncState).toEqual(next);
+		expect(p.settings.bookSyncState).toEqual(next);
 	});
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -339,7 +475,7 @@ describe("persistent diagnostics and whole-sync counts", () => {
 			{ row: 2, asin: "NO_TITLE", reason: "missing-title" as const },
 			{ row: 3, asin: "OK", reason: "duplicate-asin" as const },
 		];
-		p.kindleApiService.lastFetchDiagnostics = { excludedRows, library: { status: "complete", snapshots: [] } } as any;
+		p.kindleApiService.lastFetchDiagnostics = { excludedRows, library: { status: "complete", snapshots: [] }, failedAnnotations: [{ asin: "FETCH_FAILED", reason: "annotation-fetch-failed" }] } as any;
 		vi.mocked(p.kindleApiService.fetchHighlights).mockImplementationOnce(async (_region, emitter) => {
 			emitter.emit("fetch:booklist:end", { totalBooks: 2, excludedRows });
 			return { books: [book], highlights: [], failedBooks: 1 };
@@ -358,7 +494,7 @@ describe("persistent diagnostics and whole-sync counts", () => {
 		const p = plugin();
 		p.settings.downloadMetadata = true;
 		const excludedRows = [{ row: 2, asin: "NO_TITLE", reason: "missing-title" as const }];
-		p.kindleApiService.lastFetchDiagnostics = { excludedRows, library: { status: "complete", snapshots: [] } } as any;
+		p.kindleApiService.lastFetchDiagnostics = { excludedRows, library: { status: "complete", snapshots: [] }, failedAnnotations: [] } as any;
 		vi.mocked(p.kindleApiService.fetchHighlights).mockImplementationOnce(async (_region, emitter) => {
 			emitter.emit("fetch:booklist:end", { totalBooks: 1, excludedRows });
 			return { books: [{ id: "OK", asin: "OK", title: "Book" }], highlights: [], failedBooks: 0 };

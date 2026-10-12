@@ -3,6 +3,9 @@
     "syncKindleHighlights": {
       "name": "Sync Kindle Highlights"
     },
+    "syncAllKindleHighlights": {
+      "name": "Fetch All Kindle Highlights"
+    },
     "logoutKindle": {
       "name": "Logout from Kindle"
     }
@@ -25,8 +28,8 @@
     "unknownError": "Unknown error",
     "fileProcessingError": "Error processing file: {{filePath}}. File object not found.",
     "busy": "Another Kindle operation is running.",
-    "partial": "Sync: {{failed}} failures and {{held}} notes held for review. Added {{added}} highlights, {{standaloneNotes}} standalone notes and {{attachedNotes}} attached notes.",
-    "summary": "Sync complete: {{created}} created, {{updated}} updated, {{added}} highlights added. Added {{standaloneNotes}} standalone notes and {{attachedNotes}} attached notes.",
+    "partial": "Sync: {{failed}} failures and {{held}} notes held for review. Added {{added}} highlights, {{standaloneNotes}} standalone notes and {{attachedNotes}} attached notes. Skipped fetching {{skipped}} unchanged books.",
+    "summary": "Sync complete: {{created}} created, {{updated}} updated, {{added}} highlights added. Added {{standaloneNotes}} standalone notes and {{attachedNotes}} attached notes. Skipped fetching {{skipped}} unchanged books.",
     "safeFailure": "Sync could not be completed. Notes for books with authentication or fetch failures were not changed.",
     "libraryUnconfirmed": "Could not confirm the complete library range. Notes were not changed; the observed range is in the diagnostics report.",
     "libraryLoadFailed": "Loading additional library pages failed. Notes were not changed; the observed range is in the diagnostics report.",
