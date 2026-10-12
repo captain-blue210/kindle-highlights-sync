@@ -50,6 +50,64 @@ describe("legacy plain Markdown comparison", () => {
 	});
 });
 
+describe("unique exact legacy correspondence", () => {
+	it.each(["plain", "quote"])("matches distinct %s texts sharing one location", (style) => {
+		const body = style === "plain"
+			? "alpha — location: [10](kindle://book?action=open&asin=ABC&location=10) ^old-alpha\n\n---\nbeta — location: [10](kindle://book?action=open&asin=ABC&location=10) ^old-beta\n"
+			: "> alpha ^old-alpha\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n> beta ^old-beta\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const remote = [h("alpha"), h("beta")];
+		const first = mergeHighlights(body, remote, "ABC");
+		expect(first.warnings).toEqual([]);
+		expect(first.added).toBe(0);
+		expect(first.body.startsWith(body)).toBe(true);
+		const payload = first.body.match(/<!-- kindle-sync:v1 (\S+) -->/)![1];
+		expect(Object.values(JSON.parse(Buffer.from(payload, "base64").toString()).entries))
+			.toEqual([{ anchor: "old-alpha" }, { anchor: "old-beta" }]);
+		expect(mergeHighlights(first.body, remote, "ABC").body).toBe(first.body);
+	});
+	it("holds duplicate exact blocks instead of choosing the first", () => {
+		const body = "> alpha ^old-first\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n> alpha ^old-second\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const result = mergeHighlights(body, [h("alpha")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.added).toBe(0);
+		expect(result.heldAnnotations[0].reason).toBe("ambiguous-legacy");
+	});
+	it("counts an occupied exact block when deciding whether correspondence is unique", () => {
+		const first = mergeHighlights("> gamma ^old-used\n> [10](kindle://book?action=open&asin=ABC&location=10)\n", [h("gamma")], "ABC");
+		const body = first.body.replace("> gamma", "> alpha") + "> alpha ^old-free\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const result = mergeHighlights(body, [h("gamma"), h("alpha")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.heldAnnotations[0].reason).toBe("ambiguous-legacy");
+	});
+	it("holds a unique text when its old anchor is repeated elsewhere", () => {
+		const body = "> alpha ^old-repeated\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n> beta ^old-repeated\n> [20](kindle://book?action=open&asin=ABC&location=20)\n";
+		const result = mergeHighlights(body, [h("alpha"), h("beta", "20")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.heldAnnotations).toHaveLength(2);
+	});
+	it("keeps edited hash fallback conservative when another block shares the location", () => {
+		const body = "> [[Related]] Edited abc ^ref-19495\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n> unrelated ^old-other\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const result = mergeHighlights(body, [h("abc")], "ABC");
+		expect(result.body).toBe(body);
+		expect(result.heldAnnotations[0].reason).toBe("ambiguous-legacy");
+	});
+	it("matches distinct anchored standalone memos at one location", () => {
+		const body = "> first memo\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^old-first-memo\n\n> second memo\n> [10](kindle://book?action=open&asin=ABC&location=10)\n\n^old-second-memo\n";
+		const remote = [h("", "10", "first memo"), h("", "10", "second memo")];
+		const result = mergeHighlights(body, remote, "ABC");
+		expect(result.warnings).toEqual([]);
+		expect(result.added).toBe(0);
+		expect(result.body.startsWith(body)).toBe(true);
+		expect(mergeHighlights(result.body, remote, "ABC").body).toBe(result.body);
+	});
+	it("does not treat a legacy highlight as an identically worded standalone memo", () => {
+		const body = "> alpha ^ref-12345\n> [10](kindle://book?action=open&asin=ABC&location=10)\n";
+		const result = mergeHighlights(body, [h("", "10", "alpha")], "ABC");
+		expect(result.added).toBe(1);
+		expect(result.body.startsWith(body)).toBe(true);
+	});
+});
+
 describe("source annotations independent of edited note text", () => {
 	it("retains an existing quote-only proof ledger when the user has a separate block ID", () => {
 		// Captured from the previous implementation, before quote scanning attached separate IDs.

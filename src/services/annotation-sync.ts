@@ -459,12 +459,19 @@ export function reconcileAnnotations(
 						!!loc &&
 						b.location === loc)),
 		);
-		if (
-			safe.length === 1 &&
-			candidates.length === 1 &&
-			(!memo || safe[0].anchors.length > 0)
-		)
-			proposals.push({ key, block: safe[0] });
+		// Count exact matches before excluding occupied/unsafe targets: a second
+		// identical block must never become unambiguous merely because it is used.
+		const exact = candidates.filter(
+			(b) => !!loc && b.location === loc && b.text === text,
+		);
+		const exactTarget = exact.length === 1 && safe.includes(exact[0]) &&
+			(!memo || exact[0].anchors.length > 0) ? exact[0] : undefined;
+		const fallbackTarget = exact.length === 0 && safe.length === 1 &&
+			candidates.length === 1 && (!memo || safe[0].anchors.length > 0)
+			? safe[0] : undefined;
+		const target = exactTarget ?? fallbackTarget;
+		if (target)
+			proposals.push({ key, block: target });
 		else if (
 			candidates.length ||
 			personalMemoMatches ||
