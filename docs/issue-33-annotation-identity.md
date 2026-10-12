@@ -109,3 +109,11 @@ saveBookNotes(io, settings, books, highlights, onBook, onBookSettled, {
 - `git diff --check`: exit 0。
 - 独立レビューのImportant 5件を再現テストでRED→GREENにした。コード例中のID、未閉鎖のフェンス／HTMLコメント、実台帳の前の台帳サンプル、指定先の保存直前ASIN削除、未知／不正台帳の混在を修正。Critical指摘・未修正Minor指摘はなし。
 - ノート内台帳を採用した設計判断と、保存先パス別の手動対応オプションはspec/planに記録。前者の利用上の差はノートのバックアップ／exportにプラグイン用コメントが含まれること。
+
+## 未確認事項の追補（2026-10-12）
+
+日本のNotebookで3冊677件のIDを再取得比較し、すべて一致した。長期・編集後・note-only IDの保証は引き続き未確認。主キーの方式は変更していない。
+
+#34との統合候補は `codex/verify-issues-33-34`（a363109）。全253テスト、型チェック、buildを確認し、実ノート241件の複製で選択先隔離・連続同期・新規追加・保存後例外回復と実Fletcher16衝突の保留解除を検証した。原本は全件hash不変。
+
+詳しい結果と残る実Obsidian制約は [issue-33-34-integration-validation.md](issue-33-34-integration-validation.md) を参照。実ランタイム検証にはinstaller更新が必要で、利用者の回答待ち。両PRとmainは未マージ。
