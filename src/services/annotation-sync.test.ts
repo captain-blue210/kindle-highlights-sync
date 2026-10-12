@@ -12,6 +12,44 @@ const h = (text: string, location = "10", note?: string): Highlight => ({
 	note,
 });
 
+describe("legacy plain Markdown comparison", () => {
+	it.each(["\n", "\r\n"])("reads text after a separator without changing %j bytes", (newline) => {
+		const body = [
+			"alpha — location: [10](kindle://book?action=open&asin=ABC&location=10) ^old-alpha",
+			"", "---",
+			"beta — location: [20](kindle://book?action=open&asin=ABC&location=20) ^old-beta",
+			"",
+		].join(newline);
+		const remote = [h("alpha"), h("beta", "20")];
+		const first = mergeHighlights(body, remote, "ABC");
+		expect(first.warnings).toEqual([]);
+		expect(first.added).toBe(0);
+		expect(first.body.startsWith(body)).toBe(true);
+		const payload = first.body.match(/<!-- kindle-sync:v1 (\S+) -->/)![1];
+		expect(Object.values(JSON.parse(Buffer.from(payload, "base64").toString()).entries))
+			.toEqual([{ anchor: "old-alpha" }, { anchor: "old-beta" }]);
+		expect(mergeHighlights(first.body, remote, "ABC").body).toBe(first.body);
+	});
+	it("does not consume a literal dash line as a multiline location label", () => {
+		const body = "--\nbeta — location: [20](kindle://book?action=open&asin=ABC&location=20) ^old-beta\n";
+		const result = mergeHighlights(body, [h("--\nbeta", "20")], "ABC");
+		expect(result.warnings).toEqual([]);
+		expect(result.added).toBe(0);
+		expect(result.body.startsWith(body)).toBe(true);
+	});
+	it("keeps a previously saved separator-prefixed plain proof ledger", () => {
+		const body = "---\nbeta — location: [20](kindle://book?action=open&asin=ABC&location=20)\n\n" +
+			"<!-- kindle-sync:v1 eyJ2ZXJzaW9uIjoxLCJhc2luIjoiQUJDIiwiZW50cmllcyI6eyJzMS03NmY0ZjdhNDk3Y2JhMGViN2Y4NzFhNzBjZjFhYjA0ZWQxNmI4NTNmYTNlYzkzYjI2N2EwYmViNmE2ZDU3MTc5Ijp7InByb29mIjoiYjU5MzQwNmJmZjA3OTVkNjExZmUyNmQ5Mjg4MDE4ZWExN2Q5YjhiZDUwMzQwMjA5MzRkNTk3ZDBiYTBkM2I3YSJ9fX0= -->\n";
+		const repeated = mergeHighlights(body, [h("beta", "20")], "ABC");
+		expect(repeated.warnings).toEqual([]);
+		expect(repeated.body).toBe(body);
+		const added = mergeHighlights(body, [h("beta", "20"), h("gamma", "30")], "ABC");
+		expect(added.warnings).toEqual([]);
+		expect(added.added).toBe(1);
+		expect(added.body.startsWith(body.split("<!-- kindle-sync:v1")[0])).toBe(true);
+	});
+});
+
 describe("source annotations independent of edited note text", () => {
 	it("retains an existing quote-only proof ledger when the user has a separate block ID", () => {
 		// Captured from the previous implementation, before quote scanning attached separate IDs.

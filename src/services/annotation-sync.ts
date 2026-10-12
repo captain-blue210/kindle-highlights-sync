@@ -142,10 +142,13 @@ function scanBlocks(visible: string, asin: string): LegacyBlock[] {
 				? block
 						.slice(0, link.index)
 						.replace(
-							/\s*(?:[—–-]\s*[^:\n]+:\s*)?\[[^\]\n]*\]\($/,
+							/[ \t]*(?:[—–-][ \t]*[^:\r\n]+:[ \t]*)?\[[^\]\r\n]*\]\($/,
 							"",
 						)
 				: block;
+		// A paragraph split can leave its preceding horizontal rule attached.
+		// Clean only the comparison text; keep raw block bytes for proof compatibility.
+		if (!quote) text = text.replace(/^(?:[ \t]*-{3,}[ \t]*\r?\n)+/, "");
 		text = normalizeSourceText(
 			text.replace(/\^[A-Za-z0-9-]+(?=\s|$)/g, ""),
 		);
