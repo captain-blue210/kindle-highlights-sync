@@ -292,7 +292,7 @@ describe("atomic annotation ledger and selected destination", () => {
 		expect(first.created).toBe(1);
 		const path = "books/Renamed Book.md";
 		const edited =
-			io.files.get(path)!.replace("> abc ", "> [[Related|Edited abc]] ") +
+			io.files.get(path)!.replace("> abc", "> [[Related|Edited abc]]") +
 			"\nPersonal memo [[Other]]\n";
 		io.files.delete(path);
 		io.files.set("books/My edited title.md", edited);

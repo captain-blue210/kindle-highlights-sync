@@ -13,6 +13,21 @@ const h = (text: string, location = "10", note?: string): Highlight => ({
 });
 
 describe("source annotations independent of edited note text", () => {
+	it("places a quotation block ID outside the quote before its attached note", () => {
+		const rendered = renderHighlight(h("abc\nsecond line", "10", "My note"), "ABC");
+		expect(rendered).toMatch(/> abc\n> second line\n> \[10\]\([^\n]+\)\n\n\^ks-[a-f0-9]{64}\n\nMy note$/);
+		const prepared = prepareNewNoteAnnotations(rendered, [h("abc\nsecond line", "10", "My note")], "ABC");
+		expect(prepared.warnings).toEqual([]);
+	});
+	it("holds a template ID followed by another line in the same quotation", () => {
+		const body = `> abc ^ks-${"a".repeat(64)}\n> location\n`;
+		// Use the generated ID but place it in the position Obsidian does not index.
+		const anchor = renderHighlight(h("abc"), "ABC").match(/\^ks-[a-f0-9]{64}/)![0];
+		const invalid = body.replace(/\^ks-[a-f0-9]{64}/, anchor);
+		const result = prepareNewNoteAnnotations(invalid, [h("abc")], "ABC");
+		expect(result.body).toBe(invalid);
+		expect(result.heldAnnotations[0]?.reason).toBe("missing-target");
+	});
 	it.each([
 		"quote-fence",
 		"indent",
@@ -119,7 +134,7 @@ describe("source annotations independent of edited note text", () => {
 	it("recognizes locally edited new blocks without hashing their display text", () => {
 		const first = mergeHighlights("", [h("abc")], "ABC");
 		const edited =
-			first.body.replace("> abc ", "> [[Related|My edited abc]] ") +
+			first.body.replace("> abc", "> [[Related|My edited abc]]") +
 			"\nPersonal memo [[Other]]\n";
 		const result = mergeHighlights(
 			edited,
@@ -127,7 +142,7 @@ describe("source annotations independent of edited note text", () => {
 			"ABC",
 		);
 		expect(result.added).toBe(1);
-		expect(result.body).toContain("> [[Related|My edited abc]] ");
+		expect(result.body).toContain("> [[Related|My edited abc]]");
 		expect(result.body).toContain("Personal memo [[Other]]");
 	});
 	it("holds a hash-only edited legacy block and reports a source key for explicit resolution", () => {
