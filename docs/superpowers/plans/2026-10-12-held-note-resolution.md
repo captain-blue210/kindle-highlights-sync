@@ -60,5 +60,5 @@
 **Interfaces:** Consumes completed branch and private verification evidence.
 
 - [x] Request one independent whole-branch review, address important findings with RED→GREEN verification, and recheck the relevant suite.
-- [ ] Push the completed work on its feature branch and create/attach a reviewable PR. Do not merge a new PR without user authorization.
-- [ ] Append the canonical daily AI journal entry and report resolved/remaining counts plus private review list and backups.
+- [x] Push the completed work on its feature branch and create/attach a reviewable PR. Do not merge a new PR without user authorization.
+- [x] Append the canonical daily AI journal entry and report resolved/remaining counts plus private review list and backups.
