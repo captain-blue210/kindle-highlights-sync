@@ -112,8 +112,8 @@ saveBookNotes(io, settings, books, highlights, onBook, onBookSettled, {
 
 ## 未確認事項の追補（2026-10-12）
 
-日本のNotebookで3冊677件のIDを再取得比較し、すべて一致した。長期・編集後・note-only IDの保証は引き続き未確認。主キーの方式は変更していない。
+日本のNotebookで3冊677件のIDを再取得比較し、すべて一致した。長期・編集後のID保証は引き続き未確認。note-onlyは統合検証記録の追補で実DOMと短時間のID一致を確認した。主キーの方式は変更していない。
 
 #34との統合候補は `codex/verify-issues-33-34`（最終コード32b1f75）。初回254テスト、最終257テスト・型チェック・buildを確認し、実ノート241件の複製で選択先隔離・連続同期・新規追加・保存後例外回復と実Fletcher16衝突の保留解除を検証した。原本は全件hash不変。
 
-詳しい結果と残る実Obsidian制約は [issue-33-34-integration-validation.md](issue-33-34-integration-validation.md) を参照。installerを1.14.4へ更新し、複製VaultでModal・設定保存／再読込・実同期・block参照描画／改名追従・改名／削除後保留・再指定回復を確認した。新規block IDの生成位置と既存proof台帳の互換性をRED→GREENで修正。PR #37の最終検証は204テスト・型チェック・build成功。両PRとmainは未マージ。
+詳しい結果と残る実Obsidian制約は [issue-33-34-integration-validation.md](issue-33-34-integration-validation.md) を参照。installerを1.14.4へ更新し、複製VaultでModal・設定保存／再読込・実同期・block参照描画／改名追従・改名／削除後保留・再指定回復を確認した。新規block IDの生成位置と既存proof台帳の互換性をRED→GREENで修正。PR #37の最終検証は204テスト・型チェック・build成功。この実機確認時点では両PRは未マージ。その後PR #37/#38はmainへマージ済み。
